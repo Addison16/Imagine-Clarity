@@ -71,6 +71,7 @@ async def api_upscale(
     face_enhance: bool = Form(False),
     denoise: float = Form(0.55),
     tile: int = Form(512),
+    device: str = Form("auto"),
     output_format: str = Form("png"),
 ) -> StreamingResponse:
     raw, metadata = await _read_validated_upload(image)
@@ -82,6 +83,7 @@ async def api_upscale(
             face_enhance=face_enhance,
             denoise=denoise,
             tile=tile,
+            device=device,
             output_format=output_format,
         )
         started = time.perf_counter()
@@ -132,6 +134,7 @@ async def api_remove_background(
     alpha_matting: bool = Form(True),
     edge_refine: int = Form(8),
     background_tolerance: int = Form(34),
+    device: str = Form("auto"),
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
@@ -146,6 +149,7 @@ async def api_remove_background(
             alpha_matting=alpha_matting,
             edge_refine=edge_refine,
             background_tolerance=background_tolerance,
+            device=device,
             post_process_mask=post_process_mask,
             preserve_interior=preserve_interior,
             respect_existing_alpha=respect_existing_alpha,
@@ -221,6 +225,7 @@ def _runtime_info() -> dict[str, object]:
     info: dict[str, object] = {
         "requested_device": os.getenv("UPSCALER_DEVICE", "auto"),
         "background_requested_device": os.getenv("REMBG_DEVICE", os.getenv("UPSCALER_DEVICE", "auto")),
+        "available_devices": ["cpu"],
         "torch": None,
         "cuda_available": False,
         "cuda_device": None,
@@ -236,6 +241,7 @@ def _runtime_info() -> dict[str, object]:
                 "torch": torch.__version__,
                 "cuda_available": cuda_available,
                 "cuda_device": torch.cuda.get_device_name(0) if cuda_available else None,
+                "available_devices": ["cpu", "cuda"] if cuda_available else ["cpu"],
             }
         )
     except Exception as exc:

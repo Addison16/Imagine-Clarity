@@ -12,7 +12,6 @@ from PIL import Image, ImageFilter, ImageOps
 
 SUPPORTED_FORMATS = {"png", "jpeg", "jpg", "webp"}
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
-DEVICE_PREF = os.getenv("UPSCALER_DEVICE", "auto").lower()
 
 
 @dataclass(frozen=True)
@@ -22,6 +21,7 @@ class UpscaleOptions:
     face_enhance: bool = False
     denoise: float = 0.55
     tile: int = 256
+    device: str = "auto"
     output_format: str = "png"
 
 
@@ -87,7 +87,7 @@ def upscale_image(raw: bytes, options: UpscaleOptions) -> UpscaleResult:
 
     if options.mode == "conservative":
         output = _conservative_resize(img, options.scale)
-        engine = "Lanczos + unsharp mask"
+        engine = "Lanczos + unsharp mask (CPU)"
     else:
         output, engine = _neural_resize(img, options)
 
@@ -130,8 +130,20 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
         face_enhance=bool(options.face_enhance),
         denoise=denoise,
         tile=tile,
+        device=_normalize_device(options.device),
         output_format=output_format,
     )
+
+
+def _normalize_device(requested: str) -> str:
+    device = (requested or "auto").lower().strip()
+    if device == "auto":
+        device = os.getenv("UPSCALER_DEVICE", "auto").lower().strip()
+    if device == "gpu":
+        device = "cuda"
+    if device in {"auto", "cpu"} or device.startswith("cuda"):
+        return device
+    raise ValueError("Upscale device must be auto, cpu, or cuda.")
 
 
 def _open_image(raw: bytes) -> Image.Image:
@@ -168,11 +180,12 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
         ) from exc
 
     spec = MODEL_SPECS[options.mode]
-    device = _select_device(torch)
+    device = _select_device(torch, options.device)
+    device_key = str(device)
     half = device.type == "cuda"
 
     with _cache_lock:
-        upsampler = _upsampler_cache.get((spec.key, device.type))
+        upsampler = _upsampler_cache.get((spec.key, device_key))
         if upsampler is None:
             MODEL_DIR.mkdir(parents=True, exist_ok=True)
             model_path = _download_model(load_file_from_url, spec.model_url)
@@ -194,7 +207,7 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
                 half=half,
                 device=device,
             )
-            _upsampler_cache[(spec.key, device.type)] = upsampler
+            _upsampler_cache[(spec.key, device_key)] = upsampler
 
     upsampler.tile = options.tile
     if spec.dni_url and hasattr(upsampler, "dni_weight"):
@@ -203,17 +216,17 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
     cv_img = _pil_to_cv(img, cv2)
     try:
         if options.face_enhance:
-            face_enhancer = _get_face_enhancer(device.type, int(options.scale), upsampler)
+            face_enhancer = _get_face_enhancer(device_key, int(options.scale), upsampler)
             _, _, output = face_enhancer.enhance(
                 cv_img,
                 has_aligned=False,
                 only_center_face=False,
                 paste_back=True,
             )
-            engine = f"{spec.display_name} + GFPGAN"
+            engine = f"{spec.display_name} + GFPGAN ({device.type.upper()})"
         else:
             output, _ = upsampler.enhance(cv_img, outscale=options.scale)
-            engine = spec.display_name
+            engine = f"{spec.display_name} ({device.type.upper()})"
     except RuntimeError as exc:
         if "out of memory" in str(exc).lower() and options.tile == 0:
             raise RuntimeError("Upscale ran out of memory. Retry with tile size 256 or 128.") from exc
@@ -244,13 +257,13 @@ def _build_model(spec: ModelSpec, rrdb_cls: Any, srvgg_cls: Any) -> Any:
     raise ValueError(f"Unknown model architecture: {spec.arch}")
 
 
-def _select_device(torch: Any) -> Any:
-    if DEVICE_PREF == "cpu":
+def _select_device(torch: Any, requested: str) -> Any:
+    if requested == "cpu":
         return torch.device("cpu")
-    if DEVICE_PREF.startswith("cuda"):
+    if requested.startswith("cuda"):
         if not torch.cuda.is_available():
-            raise RuntimeError("UPSCALER_DEVICE is set to CUDA, but CUDA is not available in this container.")
-        return torch.device(DEVICE_PREF)
+            raise RuntimeError("CUDA was selected for this upscale job, but CUDA is not available in this container.")
+        return torch.device(requested)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -258,14 +271,14 @@ def _download_model(load_file_from_url: Any, url: str) -> str:
     return load_file_from_url(url=url, model_dir=str(MODEL_DIR), progress=True, file_name=None)
 
 
-def _get_face_enhancer(device_type: str, scale: int, bg_upsampler: Any) -> Any:
+def _get_face_enhancer(device_key: str, scale: int, bg_upsampler: Any) -> Any:
     try:
         from basicsr.utils.download_util import load_file_from_url
         from gfpgan import GFPGANer
     except Exception as exc:
         raise RuntimeError("GFPGAN face restoration dependencies are not available.") from exc
 
-    cache_key = ("GFPGANv1.3", device_type, scale)
+    cache_key = ("GFPGANv1.3", device_key, scale)
     with _cache_lock:
         face_enhancer = _face_cache.get(cache_key)
         if face_enhancer is None:

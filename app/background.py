@@ -43,6 +43,7 @@ class BackgroundOptions:
     alpha_matting: bool = True
     edge_refine: int = 8
     background_tolerance: int = 34
+    device: str = "auto"
     post_process_mask: bool = True
     preserve_interior: bool = True
     respect_existing_alpha: bool = True
@@ -85,12 +86,12 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
             height=img.height,
             extension=extension,
             media_type=media_type,
-            engine="edge-color safe cut",
+            engine="edge-color safe cut (CPU)",
         )
 
     try:
         from rembg import new_session, remove
-        providers = _select_onnx_providers()
+        providers = _select_onnx_providers(options.device)
     except Exception as exc:
         raise RuntimeError("The background-removal dependencies are not available. Rebuild the Docker image.") from exc
 
@@ -157,11 +158,23 @@ def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
         alpha_matting=bool(options.alpha_matting),
         edge_refine=edge_refine,
         background_tolerance=background_tolerance,
+        device=_normalize_device(options.device),
         post_process_mask=bool(options.post_process_mask),
         preserve_interior=bool(options.preserve_interior),
         respect_existing_alpha=bool(options.respect_existing_alpha),
         output_format=output_format,
     )
+
+
+def _normalize_device(requested: str) -> str:
+    device = (requested or "auto").lower().strip()
+    if device == "auto":
+        device = os.getenv("REMBG_DEVICE", os.getenv("UPSCALER_DEVICE", "auto")).lower().strip()
+    if device == "gpu":
+        device = "cuda"
+    if device in {"auto", "cpu"} or device.startswith("cuda"):
+        return device
+    raise ValueError("Background device must be auto, cpu, or cuda.")
 
 
 def _has_existing_cutout(img: Image.Image) -> bool:
@@ -329,8 +342,7 @@ def _encode(img: Image.Image, output_format: str) -> tuple[bytes, str, str]:
     return buffer.getvalue(), "png", "image/png"
 
 
-def _select_onnx_providers() -> list[str]:
-    requested = os.getenv("REMBG_DEVICE", os.getenv("UPSCALER_DEVICE", "auto")).lower()
+def _select_onnx_providers(requested: str) -> list[str]:
     if requested == "cpu":
         return ["CPUExecutionProvider"]
 
@@ -345,6 +357,13 @@ def _select_onnx_providers() -> list[str]:
     import onnxruntime as ort
 
     available = ort.get_available_providers()
+    if requested.startswith("cuda"):
+        if not torch_cuda_available or "CUDAExecutionProvider" not in available:
+            raise RuntimeError(
+                "CUDA was selected for this background-removal job, but CUDA is not available in this container."
+            )
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+
     if torch_cuda_available and "CUDAExecutionProvider" in available:
         return ["CUDAExecutionProvider", "CPUExecutionProvider"]
     return ["CPUExecutionProvider"]

@@ -101,6 +101,15 @@
               <details class="advanced">
                 <summary>Upscale advanced</summary>
                 <label class="field">
+                  <span class="label">Processing source</span>
+                  <select id="upscale-device" class="device-select" name="upscale_device">
+                    <option value="auto" selected>Auto select</option>
+                    <option value="cuda">NVIDIA GPU</option>
+                    <option value="cpu">CPU</option>
+                  </select>
+                </label>
+
+                <label class="field">
                   <span class="label-row">
                     <span>Noise reduction</span>
                     <output id="denoise-value" for="denoise">0.55</output>
@@ -162,6 +171,15 @@
 
               <details class="advanced">
                 <summary>Background advanced</summary>
+                <label class="field">
+                  <span class="label">Processing source</span>
+                  <select id="background-device" class="device-select" name="background_device">
+                    <option value="auto" selected>Auto select</option>
+                    <option value="cuda">NVIDIA GPU</option>
+                    <option value="cpu">CPU</option>
+                  </select>
+                </label>
+
                 <label class="field">
                   <span class="label-row">
                     <span>Edge cleanup</span>

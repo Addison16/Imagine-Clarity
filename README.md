@@ -27,6 +27,29 @@ http://localhost:8794
 
 The startup scripts use NVIDIA GPU acceleration when it is available and verified; otherwise the app runs on CPU. See [PUBLISHING.md](PUBLISHING.md) if you want to push prebuilt images to GitHub Container Registry.
 
+Run a published CPU image directly with Docker:
+
+```powershell
+docker run --pull always --name clarity-upscaler -p 8794:8794 -v clarity-models:/models ghcr.io/addison16/imagine-clarity:cpu
+```
+
+Run a published NVIDIA GPU image directly with Docker:
+
+```powershell
+docker run --pull always --gpus all --name clarity-upscaler -p 8794:8794 -v clarity-models:/models ghcr.io/addison16/imagine-clarity:gpu
+```
+
+Or use the prebuilt-image helper scripts:
+
+```powershell
+.\scripts\start-prebuilt.ps1
+```
+
+```bash
+chmod +x ./scripts/start-prebuilt.sh
+./scripts/start-prebuilt.sh
+```
+
 ## Approach
 
 The default neural path uses Real-ESRGAN because it is designed for practical blind super-resolution: unknown blur, noise, compression artifacts, and mixed real-world degradation. The app also includes:
@@ -140,6 +163,7 @@ curl.exe -X POST http://localhost:8794/api/upscale `
   -F "mode=photo" `
   -F "face_enhance=false" `
   -F "tile=256" `
+  -F "device=auto" `
   -F "output_format=png" `
   --output upscaled.png
 ```
@@ -154,6 +178,7 @@ curl.exe -X POST http://localhost:8794/api/remove-background `
   -F "alpha_matting=true" `
   -F "edge_refine=8" `
   -F "background_tolerance=34" `
+  -F "device=auto" `
   -F "post_process_mask=true" `
   -F "preserve_interior=true" `
   -F "respect_existing_alpha=true" `
@@ -169,6 +194,14 @@ curl.exe -X POST http://localhost:8794/api/remove-background `
 - GPU mode uses `Dockerfile.gpu`, CUDA-enabled PyTorch wheels, and `onnxruntime-gpu` so both upscaling and background removal can use the NVIDIA GPU. It requires an NVIDIA driver plus Docker's NVIDIA runtime.
 - `REMBG_DEVICE`: optional override for background removal, defaults to `UPSCALER_DEVICE`. Use `cpu` to force background removal to CPU.
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
+
+Per-job processing source:
+
+- The UI includes a `Processing source` dropdown for both Upscale and Remove Background.
+- `Auto select`: use CUDA when the running container can see it, otherwise CPU.
+- `NVIDIA GPU`: require CUDA for that job.
+- `CPU`: force that one job to CPU.
+- API callers can send `device=auto`, `device=cuda`, or `device=cpu` to `/api/upscale` and `/api/remove-background`.
 
 Background `model` values:
 

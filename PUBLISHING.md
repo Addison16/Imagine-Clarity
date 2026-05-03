@@ -41,33 +41,44 @@ chmod +x ./scripts/start.sh
 
 The included GitHub Actions workflow publishes:
 
-- `ghcr.io/YOUR_NAME/YOUR_REPO:cpu`
-- `ghcr.io/YOUR_NAME/YOUR_REPO:gpu`
+- `ghcr.io/addison16/imagine-clarity:cpu`
+- `ghcr.io/addison16/imagine-clarity:gpu`
 
 After pushing to GitHub, open the repo's Actions tab and run `Docker Publish`, or push to the `main` branch. If the package should be public, change the package visibility in GitHub's Packages settings.
 
 Run prebuilt CPU image with Compose:
 
 ```powershell
-$env:CLARITY_IMAGE="ghcr.io/YOUR_NAME/YOUR_REPO:cpu"
+$env:CLARITY_IMAGE="ghcr.io/addison16/imagine-clarity:cpu"
 docker compose -f docker-compose.prebuilt.yml up -d
 ```
 
 Run prebuilt NVIDIA GPU image with Compose:
 
 ```powershell
-$env:CLARITY_IMAGE="ghcr.io/YOUR_NAME/YOUR_REPO:gpu"
+$env:CLARITY_IMAGE="ghcr.io/addison16/imagine-clarity:gpu"
 docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
 ```
 
 Linux/macOS:
 
 ```bash
-CLARITY_IMAGE=ghcr.io/YOUR_NAME/YOUR_REPO:cpu docker compose -f docker-compose.prebuilt.yml up -d
+CLARITY_IMAGE=ghcr.io/addison16/imagine-clarity:cpu docker compose -f docker-compose.prebuilt.yml up -d
 ```
 
 ```bash
-CLARITY_IMAGE=ghcr.io/YOUR_NAME/YOUR_REPO:gpu docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
+CLARITY_IMAGE=ghcr.io/addison16/imagine-clarity:gpu docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
+```
+
+Run prebuilt images with the helper scripts:
+
+```powershell
+.\scripts\start-prebuilt.ps1
+```
+
+```bash
+chmod +x ./scripts/start-prebuilt.sh
+./scripts/start-prebuilt.sh
 ```
 
 Open:

@@ -25,12 +25,14 @@ const outputFormat = document.querySelector("#output-format");
 const resultTitle = document.querySelector("#result-title");
 const denoise = document.querySelector("#denoise");
 const denoiseValue = document.querySelector("#denoise-value");
+const upscaleDevice = document.querySelector("#upscale-device");
 const cutModeInputs = document.querySelectorAll('input[name="cut_mode"]');
 const edgeRefine = document.querySelector("#edge-refine");
 const edgeRefineValue = document.querySelector("#edge-refine-value");
 const bgModel = document.querySelector("#bg-model");
 const bgTolerance = document.querySelector("#bg-tolerance");
 const bgToleranceValue = document.querySelector("#bg-tolerance-value");
+const backgroundDevice = document.querySelector("#background-device");
 const resultActions = document.querySelector("#result-actions");
 const resultDownload = document.querySelector("#result-download");
 const resultSummary = document.querySelector("#result-summary");
@@ -142,6 +144,11 @@ async function loadRuntime() {
       setRuntime(`GPU: ${runtime.cuda_device || "CUDA"}`, "good");
     } else {
       setRuntime("CPU runtime", "warn");
+      document.querySelectorAll(".device-select option[value='cuda']").forEach((option) => {
+        option.disabled = true;
+      });
+      if (upscaleDevice.value === "cuda") upscaleDevice.value = "auto";
+      if (backgroundDevice.value === "cuda") backgroundDevice.value = "auto";
     }
   } catch {
     setRuntime("Runtime unknown", "warn");
@@ -335,6 +342,14 @@ bgModel.addEventListener("change", () => {
     setStatus("Ready", "ready", "Subject type updated. Start when ready.");
   }
 });
+[upscaleDevice, backgroundDevice].forEach((select) => {
+  select.addEventListener("change", () => {
+    if (selectedFile) {
+      clearResultOnly();
+      setStatus("Ready", "ready", "Processing source updated. Start when ready.");
+    }
+  });
+});
 cutModeInputs.forEach((input) => input.addEventListener("change", applyCutPreset));
 processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
@@ -375,6 +390,9 @@ form.addEventListener("submit", async (event) => {
   const payload = new FormData(form);
   payload.set("image", selectedFile);
   payload.delete("tool");
+  payload.delete("upscale_device");
+  payload.delete("background_device");
+  payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
   payload.set("face_enhance", document.querySelector("#face").checked ? "true" : "false");
   payload.set("cut_mode", selectedCutMode());
   payload.set("alpha_matting", document.querySelector("#alpha-matting").checked ? "true" : "false");
