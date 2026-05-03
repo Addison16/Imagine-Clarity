@@ -101,7 +101,10 @@
               <details class="advanced">
                 <summary>Upscale advanced</summary>
                 <label class="field">
-                  <span class="label">Processing source</span>
+                  <span class="label help-label">
+                    Processing source
+                    <span class="info-tip" tabindex="0" aria-label="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed." data-tip="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed.">i</span>
+                  </span>
                   <select id="upscale-device" class="device-select" name="upscale_device">
                     <option value="auto" selected>Auto select</option>
                     <option value="cuda">NVIDIA GPU</option>
@@ -111,14 +114,20 @@
 
                 <label class="field">
                   <span class="label-row">
-                    <span>Noise reduction</span>
+                    <span class="help-label">
+                      Noise reduction
+                      <span class="info-tip" tabindex="0" aria-label="Higher values reduce compression noise before enhancement. Lower values keep more original texture." data-tip="Higher values reduce compression noise before enhancement. Lower values keep more original texture.">i</span>
+                    </span>
                     <output id="denoise-value" for="denoise">0.55</output>
                   </span>
                   <input id="denoise" name="denoise" type="range" min="0" max="1" step="0.05" value="0.55" />
                 </label>
 
                 <label class="field">
-                  <span class="label">Processing tile size</span>
+                  <span class="label help-label">
+                    Processing tile size
+                    <span class="info-tip" tabindex="0" aria-label="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available." data-tip="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available.">i</span>
+                  </span>
                   <select id="tile" name="tile">
                     <option value="128">128</option>
                     <option value="256">256</option>
@@ -131,7 +140,10 @@
                 <label class="switch-row">
                   <input id="face" name="face_enhance" type="checkbox" />
                   <span class="switch-visual" aria-hidden="true"></span>
-                  <span>Restore faces</span>
+                  <span class="help-label">
+                    Restore faces
+                    <span class="info-tip" tabindex="0" aria-label="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images." data-tip="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images.">i</span>
+                  </span>
                 </label>
               </details>
             </div>
@@ -172,7 +184,10 @@
               <details class="advanced">
                 <summary>Background advanced</summary>
                 <label class="field">
-                  <span class="label">Processing source</span>
+                  <span class="label help-label">
+                    Processing source
+                    <span class="info-tip" tabindex="0" aria-label="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines." data-tip="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines.">i</span>
+                  </span>
                   <select id="background-device" class="device-select" name="background_device">
                     <option value="auto" selected>Auto select</option>
                     <option value="cuda">NVIDIA GPU</option>
@@ -182,7 +197,10 @@
 
                 <label class="field">
                   <span class="label-row">
-                    <span>Edge cleanup</span>
+                    <span class="help-label">
+                      Edge cleanup
+                      <span class="info-tip" tabindex="0" aria-label="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges." data-tip="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges.">i</span>
+                    </span>
                     <output id="edge-refine-value" for="edge-refine">8</output>
                   </span>
                   <input id="edge-refine" name="edge_refine" type="range" min="0" max="20" step="1" value="8" />
@@ -190,7 +208,10 @@
 
                 <label class="field">
                   <span class="label-row">
-                    <span>Background similarity</span>
+                    <span class="help-label">
+                      Background similarity
+                      <span class="info-tip" tabindex="0" aria-label="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork." data-tip="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork.">i</span>
+                    </span>
                     <output id="bg-tolerance-value" for="bg-tolerance">34</output>
                   </span>
                   <input id="bg-tolerance" name="background_tolerance" type="range" min="4" max="96" step="1" value="34" />
@@ -199,25 +220,37 @@
                 <label class="switch-row">
                   <input id="alpha-matting" name="alpha_matting" type="checkbox" checked />
                   <span class="switch-visual" aria-hidden="true"></span>
-                  <span>Fine edge matting</span>
+                  <span class="help-label">
+                    Fine edge matting
+                    <span class="info-tip" tabindex="0" aria-label="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten." data-tip="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten.">i</span>
+                  </span>
                 </label>
 
                 <label class="switch-row">
                   <input id="post-process-mask" name="post_process_mask" type="checkbox" checked />
                   <span class="switch-visual" aria-hidden="true"></span>
-                  <span>Clean mask</span>
+                  <span class="help-label">
+                    Clean mask
+                    <span class="info-tip" tabindex="0" aria-label="Removes small mask noise after cutting. Disable it if very fine details disappear." data-tip="Removes small mask noise after cutting. Disable it if very fine details disappear.">i</span>
+                  </span>
                 </label>
 
                 <label class="switch-row">
                   <input id="preserve-interior" name="preserve_interior" type="checkbox" checked />
                   <span class="switch-visual" aria-hidden="true"></span>
-                  <span>Protect inside detail</span>
+                  <span class="help-label">
+                    Protect inside detail
+                    <span class="info-tip" tabindex="0" aria-label="Keeps enclosed artwork, lettering, and texture from being treated as background holes." data-tip="Keeps enclosed artwork, lettering, and texture from being treated as background holes.">i</span>
+                  </span>
                 </label>
 
                 <label class="switch-row">
                   <input id="respect-alpha" name="respect_existing_alpha" type="checkbox" checked />
                   <span class="switch-visual" aria-hidden="true"></span>
-                  <span>Respect existing transparency</span>
+                  <span class="help-label">
+                    Respect existing transparency
+                    <span class="info-tip" tabindex="0" aria-label="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets." data-tip="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets.">i</span>
+                  </span>
                 </label>
               </details>
             </div>

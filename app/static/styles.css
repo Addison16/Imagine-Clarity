@@ -375,6 +375,88 @@ h2 {
   font-weight: 600;
 }
 
+.help-label {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.info-tip {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid #bfd0ee;
+  background: #eef3ff;
+  color: var(--accent-hover);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+}
+
+.info-tip::after {
+  content: attr(data-tip);
+  width: 248px;
+  max-width: min(248px, calc(100vw - 42px));
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 9px);
+  z-index: 20;
+  border: 1px solid #263247;
+  border-radius: 8px;
+  background: #111827;
+  color: #ffffff;
+  padding: 9px 10px;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.info-tip::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 4px);
+  z-index: 21;
+  border: 5px solid transparent;
+  border-top-color: #111827;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.info-tip:hover::after,
+.info-tip:focus-visible::after,
+.info-tip:hover::before,
+.info-tip:focus-visible::before {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.info-tip:hover::before,
+.info-tip:focus-visible::before {
+  transform: translateX(-50%);
+}
+
+.info-tip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
 .label-row {
   display: flex;
   align-items: center;
