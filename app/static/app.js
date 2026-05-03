@@ -11,6 +11,7 @@ const runtimeChip = document.querySelector("#runtime-chip");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
 const toolPanels = document.querySelectorAll("[data-tool-panel]");
 const infoTips = document.querySelectorAll(".info-tip");
+const infoPanels = document.querySelectorAll(".info-panel");
 const steps = document.querySelectorAll(".step");
 const beforeImg = document.querySelector("#before");
 const afterImg = document.querySelector("#after");
@@ -84,6 +85,8 @@ function closeInfoTips(exceptTip = null) {
     if (tip !== exceptTip) {
       tip.dataset.open = "false";
       tip.setAttribute("aria-expanded", "false");
+      const panel = document.getElementById(tip.getAttribute("aria-controls"));
+      if (panel) panel.hidden = true;
     }
   });
 }
@@ -348,9 +351,18 @@ infoTips.forEach((tip) => {
     event.preventDefault();
     event.stopPropagation();
     const shouldOpen = tip.dataset.open !== "true";
+    const panel = document.getElementById(tip.getAttribute("aria-controls"));
     closeInfoTips(tip);
     tip.dataset.open = shouldOpen ? "true" : "false";
     tip.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+    if (panel) panel.hidden = !shouldOpen;
+  });
+});
+
+infoPanels.forEach((panel) => {
+  panel.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
   });
 });
 

@@ -377,6 +377,7 @@ h2 {
 
 .help-label {
   min-width: 0;
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -397,64 +398,52 @@ h2 {
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
-  cursor: help;
+  cursor: pointer;
   padding: 0;
 }
 
-.info-tip::after {
-  content: attr(data-tip);
+.info-panel {
   width: 248px;
   max-width: min(248px, calc(100vw - 42px));
   position: absolute;
-  left: 50%;
-  bottom: calc(100% + 9px);
-  z-index: 20;
-  border: 1px solid #263247;
+  left: 0;
+  top: calc(100% + 8px);
+  z-index: 30;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #111827;
-  color: #ffffff;
-  padding: 9px 10px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.22);
+  background: #ffffff;
+  color: var(--text);
+  padding: 10px 11px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.14);
   font-size: 12px;
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.42;
   text-align: left;
   white-space: normal;
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(-50%, 4px);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
 }
 
-.info-tip::before {
+.info-panel::before {
   content: "";
+  width: 10px;
+  height: 10px;
   position: absolute;
-  left: 50%;
-  bottom: calc(100% + 4px);
-  z-index: 21;
-  border: 5px solid transparent;
-  border-top-color: #111827;
-  opacity: 0;
-  pointer-events: none;
-  transform: translateX(-50%);
+  left: 12px;
+  top: -6px;
+  border-left: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  background: #ffffff;
+  transform: rotate(45deg);
 }
 
-.info-tip:hover::after,
-.info-tip:focus-visible::after,
-.info-tip[data-open="true"]::after,
-.info-tip:hover::before,
-.info-tip:focus-visible::before,
-.info-tip[data-open="true"]::before {
-  opacity: 1;
-  transform: translate(-50%, 0);
+.info-panel[hidden] {
+  display: none;
 }
 
-.info-tip:hover::before,
-.info-tip:focus-visible::before,
-.info-tip[data-open="true"]::before {
-  transform: translateX(-50%);
+.info-tip:hover,
+.info-tip[data-open="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .info-tip:focus-visible {
