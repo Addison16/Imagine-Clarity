@@ -584,7 +584,7 @@ function selectedCutMode() {
 
 function actionText() {
   if (selectedTool() === "remove-background") return "Remove Background";
-  if (selectedTool() === "remove-background-upscale") return "Remove BG + Upscale";
+  if (selectedTool() === "remove-background-upscale") return "Remove Back Ground + Upscale";
   return "Upscale Image";
 }
 

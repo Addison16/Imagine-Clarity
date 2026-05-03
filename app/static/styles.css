@@ -556,6 +556,11 @@ input[type="number"]:focus {
   grid-template-columns: repeat(3, 1fr);
 }
 
+.action-segmented label {
+  text-align: center;
+  line-height: 1.2;
+}
+
 .button-group {
   grid-template-columns: repeat(auto-fit, minmax(64px, 1fr));
 }

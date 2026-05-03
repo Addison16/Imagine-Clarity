@@ -78,7 +78,7 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Illustration/anime`: RealESRGAN_x4plus_anime_6B for flat colors and drawn line work.
 - `Face restore`: optional GFPGAN pass for low-quality faces.
 - `Conservative`: Lanczos plus mild sharpening when exact geometry, text, or logos matter more than generated texture.
-- `Remove BG`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
+- `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 - `Batch processing`: select multiple images and the UI processes them one at a time with per-file download links.
 - `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download.
