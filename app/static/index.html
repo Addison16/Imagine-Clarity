@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Clarity Image Tools</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="header">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">CI</div>
+          <div>
+            <h1>Clarity Image Tools</h1>
+            <p class="subtitle">Upscale, enhance, or remove backgrounds from your images.</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <span id="status" class="status-badge neutral">Ready</span>
+          <span id="runtime-chip" class="runtime-badge neutral">Checking runtime</span>
+        </div>
+      </header>
+
+      <section class="layout">
+        <form id="controls" class="card sidebar">
+          <ol class="steps" aria-label="Workflow">
+            <li class="step active">Upload</li>
+            <li class="step">Settings</li>
+            <li class="step">Process</li>
+          </ol>
+
+          <details class="section section-dropdown" open>
+            <summary class="section-heading">
+              <span class="step-number">1</span>
+              <h2>Upload Image</h2>
+            </summary>
+            <label class="dropzone" id="dropzone">
+              <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp" />
+              <span class="drop-icon" aria-hidden="true"></span>
+              <span id="file-label" class="drop-title">Drop your image here</span>
+              <span id="file-meta" class="drop-copy">or click to browse</span>
+              <span class="drop-note">PNG, JPG, or WEBP supported</span>
+            </label>
+            <p class="trust-note">Your original file is never changed.</p>
+          </details>
+
+          <details class="section section-dropdown" open>
+            <summary class="section-heading">
+              <span class="step-number">2</span>
+              <h2>Basic Settings</h2>
+            </summary>
+
+            <div class="field">
+              <span class="label">Image action</span>
+              <div class="segmented" role="group" aria-label="Image action">
+                <label>
+                  <input type="radio" name="tool" value="upscale" checked />
+                  <span>Upscale</span>
+                </label>
+                <label>
+                  <input type="radio" name="tool" value="remove-background" />
+                  <span>Remove Background</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="tool-panel" data-tool-panel="upscale">
+              <label class="field">
+                <span class="label">Enhancement type</span>
+                <select id="mode" name="mode">
+                  <option value="general">Balanced clean enhancement</option>
+                  <option value="photo" selected>Photo detail enhancement</option>
+                  <option value="anime">Artwork and illustration</option>
+                  <option value="conservative">Conservative exact resize</option>
+                </select>
+              </label>
+
+              <div class="field">
+                <span class="label">Output size</span>
+                <div class="button-group" role="group" aria-label="Output size">
+                  <label>
+                    <input type="radio" name="scale" value="2" />
+                    <span>2x</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="scale" value="3" />
+                    <span>3x</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="scale" value="4" checked />
+                    <span>4x</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="scale" value="8" />
+                    <span>8x</span>
+                  </label>
+                </div>
+              </div>
+
+              <details class="advanced">
+                <summary>Upscale advanced</summary>
+                <label class="field">
+                  <span class="label-row">
+                    <span>Noise reduction</span>
+                    <output id="denoise-value" for="denoise">0.55</output>
+                  </span>
+                  <input id="denoise" name="denoise" type="range" min="0" max="1" step="0.05" value="0.55" />
+                </label>
+
+                <label class="field">
+                  <span class="label">Processing tile size</span>
+                  <select id="tile" name="tile">
+                    <option value="128">128</option>
+                    <option value="256">256</option>
+                    <option value="384">384</option>
+                    <option value="512" selected>512</option>
+                    <option value="0">Off</option>
+                  </select>
+                </label>
+
+                <label class="switch-row">
+                  <input id="face" name="face_enhance" type="checkbox" />
+                  <span class="switch-visual" aria-hidden="true"></span>
+                  <span>Restore faces</span>
+                </label>
+              </details>
+            </div>
+
+            <div class="tool-panel hidden" data-tool-panel="remove-background">
+              <label class="field">
+                <span class="label">Subject type</span>
+                <select id="bg-model" name="model">
+                  <option value="auto" selected>Auto detect</option>
+                  <option value="logo">Logo, sticker, or graphic</option>
+                  <option value="accurate">General image</option>
+                  <option value="portrait">People or portrait</option>
+                  <option value="anime">Artwork or illustration</option>
+                  <option value="biref-lite">High-detail subject</option>
+                  <option value="balanced">Balanced subject</option>
+                  <option value="fast">Fast preview</option>
+                </select>
+              </label>
+
+              <div class="field">
+                <span class="label">Cut strength</span>
+                <div class="button-group cut-group" role="group" aria-label="Cut strength">
+                  <label>
+                    <input type="radio" name="cut_mode" value="preserve" />
+                    <span>Preserve</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="cut_mode" value="balanced" checked />
+                    <span>Balanced</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="cut_mode" value="strong" />
+                    <span>Strong</span>
+                  </label>
+                </div>
+              </div>
+
+              <details class="advanced">
+                <summary>Background advanced</summary>
+                <label class="field">
+                  <span class="label-row">
+                    <span>Edge cleanup</span>
+                    <output id="edge-refine-value" for="edge-refine">8</output>
+                  </span>
+                  <input id="edge-refine" name="edge_refine" type="range" min="0" max="20" step="1" value="8" />
+                </label>
+
+                <label class="field">
+                  <span class="label-row">
+                    <span>Background similarity</span>
+                    <output id="bg-tolerance-value" for="bg-tolerance">34</output>
+                  </span>
+                  <input id="bg-tolerance" name="background_tolerance" type="range" min="4" max="96" step="1" value="34" />
+                </label>
+
+                <label class="switch-row">
+                  <input id="alpha-matting" name="alpha_matting" type="checkbox" checked />
+                  <span class="switch-visual" aria-hidden="true"></span>
+                  <span>Fine edge matting</span>
+                </label>
+
+                <label class="switch-row">
+                  <input id="post-process-mask" name="post_process_mask" type="checkbox" checked />
+                  <span class="switch-visual" aria-hidden="true"></span>
+                  <span>Clean mask</span>
+                </label>
+
+                <label class="switch-row">
+                  <input id="preserve-interior" name="preserve_interior" type="checkbox" checked />
+                  <span class="switch-visual" aria-hidden="true"></span>
+                  <span>Protect inside detail</span>
+                </label>
+
+                <label class="switch-row">
+                  <input id="respect-alpha" name="respect_existing_alpha" type="checkbox" checked />
+                  <span class="switch-visual" aria-hidden="true"></span>
+                  <span>Respect existing transparency</span>
+                </label>
+              </details>
+            </div>
+
+            <label class="field">
+              <span class="label">File format</span>
+              <select id="output-format" name="output_format">
+                <option value="png" selected>PNG</option>
+                <option value="jpeg">JPEG</option>
+                <option value="webp">WebP</option>
+              </select>
+            </label>
+          </details>
+
+          <details class="section section-dropdown" open>
+            <summary class="section-heading">
+              <span class="step-number">3</span>
+              <h2>Process & Download</h2>
+            </summary>
+            <button id="run" class="primary-button" type="submit" disabled>
+              <span id="run-label">Upscale Image</span>
+            </button>
+            <p id="status-detail" class="status-detail">Ready for an image.</p>
+          </details>
+        </form>
+
+        <article class="card preview-card">
+          <header class="preview-header">
+            <div>
+              <h2>Original</h2>
+              <p id="before-meta">No image selected</p>
+            </div>
+            <span id="input-chip" class="mini-badge hidden">Input</span>
+          </header>
+          <div class="preview-stage">
+            <img id="before" alt="Original preview" />
+            <div id="before-empty" class="empty-state">
+              <span class="empty-icon image-icon" aria-hidden="true"></span>
+              <strong>No image selected yet</strong>
+              <span>Upload an image to preview it here.</span>
+              <small>Supported: PNG, JPG, WEBP</small>
+            </div>
+          </div>
+        </article>
+
+        <article class="card preview-card result-card">
+          <header class="preview-header">
+            <div>
+              <h2 id="result-title">Result</h2>
+              <p id="after-meta">No result yet</p>
+            </div>
+            <span id="engine-chip" class="mini-badge hidden">Engine</span>
+          </header>
+
+          <div class="preview-stage">
+            <img id="after" alt="Processed result preview" />
+
+            <div id="compare-stage" class="compare-stage hidden" style="--compare: 50%">
+              <img id="compare-before" class="compare-img compare-before" alt="Original comparison preview" />
+              <div id="compare-after-wrap" class="compare-after-wrap">
+                <img id="compare-after" class="compare-img compare-after" alt="Processed comparison preview" />
+              </div>
+              <span class="compare-tag compare-tag-before">Original</span>
+              <span class="compare-tag compare-tag-after">Result</span>
+              <span class="compare-handle" aria-hidden="true"></span>
+              <input id="compare-slider" class="compare-slider" type="range" min="0" max="100" value="50" aria-label="Compare original and result" />
+            </div>
+
+            <div id="after-empty" class="empty-state">
+              <span class="empty-icon result-icon" aria-hidden="true"></span>
+              <strong>Your result will appear here</strong>
+              <span>After processing, you can compare and download your finished image.</span>
+            </div>
+
+            <div id="processing" class="processing hidden">
+              <span class="spinner" aria-hidden="true"></span>
+              <strong id="processing-label">Processing image...</strong>
+              <span>Large files may take a little longer.</span>
+            </div>
+          </div>
+
+          <footer id="result-actions" class="result-actions hidden">
+            <div>
+              <strong>Image ready</strong>
+              <span id="result-summary">Download your finished file below.</span>
+            </div>
+            <div class="result-buttons">
+              <a id="result-download" class="secondary-button" download>Download Image</a>
+              <button id="compare-toggle" class="secondary-button" type="button">Compare</button>
+              <button id="process-another" class="ghost-button" type="button">Process Another</button>
+            </div>
+          </footer>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

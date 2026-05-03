@@ -1,0 +1,84 @@
+# Publishing
+
+This repo can be shared two ways:
+
+1. Source distribution: users clone the repo and build locally with Docker Compose.
+2. Prebuilt images: GitHub Actions publishes CPU and NVIDIA GPU images to GitHub Container Registry.
+
+## Source Distribution
+
+Create a GitHub repo, then push this folder:
+
+```powershell
+git init
+git add .
+git commit -m "Initial Clarity Image Tools release"
+git branch -M main
+git remote add origin https://github.com/YOUR_NAME/YOUR_REPO.git
+git push -u origin main
+```
+
+Do not commit local model caches or generated images. The `.gitignore` file excludes `models/`, `storage/`, Python bytecode, and packaged archives.
+
+Users can run from source:
+
+```powershell
+git clone https://github.com/YOUR_NAME/YOUR_REPO.git
+cd YOUR_REPO
+.\scripts\start.ps1
+```
+
+Linux/macOS:
+
+```bash
+git clone https://github.com/YOUR_NAME/YOUR_REPO.git
+cd YOUR_REPO
+chmod +x ./scripts/start.sh
+./scripts/start.sh
+```
+
+## Prebuilt Images
+
+The included GitHub Actions workflow publishes:
+
+- `ghcr.io/YOUR_NAME/YOUR_REPO:cpu`
+- `ghcr.io/YOUR_NAME/YOUR_REPO:gpu`
+
+After pushing to GitHub, open the repo's Actions tab and run `Docker Publish`, or push to the `main` branch. If the package should be public, change the package visibility in GitHub's Packages settings.
+
+Run prebuilt CPU image with Compose:
+
+```powershell
+$env:CLARITY_IMAGE="ghcr.io/YOUR_NAME/YOUR_REPO:cpu"
+docker compose -f docker-compose.prebuilt.yml up -d
+```
+
+Run prebuilt NVIDIA GPU image with Compose:
+
+```powershell
+$env:CLARITY_IMAGE="ghcr.io/YOUR_NAME/YOUR_REPO:gpu"
+docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
+```
+
+Linux/macOS:
+
+```bash
+CLARITY_IMAGE=ghcr.io/YOUR_NAME/YOUR_REPO:cpu docker compose -f docker-compose.prebuilt.yml up -d
+```
+
+```bash
+CLARITY_IMAGE=ghcr.io/YOUR_NAME/YOUR_REPO:gpu docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
+```
+
+Open:
+
+```text
+http://localhost:8794
+```
+
+## Notes
+
+- CPU mode works on normal Intel and AMD CPUs.
+- NVIDIA GPU mode requires NVIDIA drivers plus Docker GPU support.
+- AMD and Intel graphics cards currently fall back to CPU mode.
+- The first AI run downloads model weights into the Docker volume.
