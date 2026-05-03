@@ -67,7 +67,7 @@ def health() -> dict[str, object]:
 async def api_upscale(
     image: UploadFile = File(...),
     scale: float = Form(4.0),
-    mode: str = Form("photo"),
+    mode: str = Form("auto"),
     face_enhance: bool = Form(False),
     denoise: float = Form(0.55),
     tile: int = Form(512),

@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import os
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
 @dataclass(frozen=True)
 class UpscaleOptions:
     scale: float = 4.0
-    mode: str = "photo"
+    mode: str = "auto"
     face_enhance: bool = False
     denoise: float = 0.55
     tile: int = 256
@@ -74,6 +74,13 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
 }
 
+MODE_LABELS = {
+    "photo": "photo detail",
+    "general": "balanced clean",
+    "anime": "artwork and illustration",
+    "conservative": "conservative exact resize",
+}
+
 GFPGAN_URL = "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.3.pth"
 
 _upsampler_cache: dict[tuple[str, str], Any] = {}
@@ -84,12 +91,18 @@ _cache_lock = threading.Lock()
 def upscale_image(raw: bytes, options: UpscaleOptions) -> UpscaleResult:
     options = _normalize_options(options)
     img = _open_image(raw)
+    auto_selected = options.mode == "auto"
+    if auto_selected:
+        options = replace(options, mode=_select_auto_mode(img, options))
 
     if options.mode == "conservative":
         output = _conservative_resize(img, options.scale)
         engine = "Lanczos + unsharp mask (CPU)"
     else:
         output, engine = _neural_resize(img, options)
+
+    if auto_selected:
+        engine = f"Auto: {MODE_LABELS[options.mode]} -> {engine}"
 
     encoded, extension, media_type = _encode(output, options.output_format)
     return UpscaleResult(
@@ -108,9 +121,7 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
         raise ValueError("Scale must be 2, 3, 4, or 8.")
 
     mode = options.mode.lower().strip()
-    if mode == "auto":
-        mode = "photo"
-    if mode not in {"photo", "general", "anime", "conservative"}:
+    if mode not in {"auto", "photo", "general", "anime", "conservative"}:
         raise ValueError("Mode must be photo, general, anime, conservative, or auto.")
 
     output_format = options.output_format.lower().strip()
@@ -133,6 +144,43 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
         device=_normalize_device(options.device),
         output_format=output_format,
     )
+
+
+def _select_auto_mode(img: Image.Image, options: UpscaleOptions) -> str:
+    """Pick a conservative default for graphics and a neural mode for natural images."""
+    if options.face_enhance:
+        return "photo"
+
+    rgba = img.convert("RGBA")
+    alpha = np.asarray(rgba.getchannel("A"))
+    transparent_ratio = float((alpha < 250).mean())
+
+    rgb = rgba.convert("RGB")
+    sample = rgb.copy()
+    sample.thumbnail((192, 192), Image.Resampling.BILINEAR)
+    arr = np.asarray(sample)
+    quantized = (arr // 32).reshape(-1, 3)
+    unique_bins = len({tuple(pixel) for pixel in quantized})
+
+    gray = sample.convert("L")
+    gray_arr = np.asarray(gray).astype("float32")
+    contrast = float(gray_arr.std())
+    edges = np.asarray(gray.filter(ImageFilter.FIND_EDGES)).astype("float32")
+    edge_density = float((edges > 38).mean())
+
+    is_low_color = unique_bins <= 140
+    is_very_low_color = unique_bins <= 36
+    is_hard_edge = 0.045 <= edge_density <= 0.35 and contrast >= 28
+
+    if transparent_ratio >= 0.01:
+        return "conservative"
+    if is_very_low_color and 0.018 <= edge_density <= 0.35 and contrast >= 35:
+        return "conservative"
+    if is_low_color and is_hard_edge:
+        return "anime"
+    if options.denoise >= 0.7:
+        return "general"
+    return "photo"
 
 
 def _normalize_device(requested: str) -> str:

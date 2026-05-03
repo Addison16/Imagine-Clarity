@@ -54,6 +54,7 @@ chmod +x ./scripts/start-prebuilt.sh
 
 The default neural path uses Real-ESRGAN because it is designed for practical blind super-resolution: unknown blur, noise, compression artifacts, and mixed real-world degradation. The app also includes:
 
+- `Auto detect`: chooses a safer upscale type from the image: conservative for logos/text-like graphics, illustration mode for flat artwork, general clean for noisy images, and photo detail for natural images.
 - `Photo detail`: RealESRGAN_x4plus for photos and mixed natural images.
 - `General clean`: Real-ESRGAN general v3 with denoise blending for noisy or compressed images.
 - `Illustration/anime`: RealESRGAN_x4plus_anime_6B for flat colors and drawn line work.
@@ -160,7 +161,7 @@ Upscale:
 curl.exe -X POST http://localhost:8794/api/upscale `
   -F "image=@input.jpg" `
   -F "scale=8" `
-  -F "mode=photo" `
+  -F "mode=auto" `
   -F "face_enhance=false" `
   -F "tile=256" `
   -F "device=auto" `
@@ -202,6 +203,14 @@ Per-job processing source:
 - `NVIDIA GPU`: require CUDA for that job.
 - `CPU`: force that one job to CPU.
 - API callers can send `device=auto`, `device=cuda`, or `device=cpu` to `/api/upscale` and `/api/remove-background`.
+
+Upscale `mode` values:
+
+- `auto`: choose the upscale type from the image. It prefers conservative resizing for transparent assets, logos, text-heavy graphics, and very flat hard-edged artwork; illustration mode for drawn/flat-color images; general clean for high denoise settings; and photo detail for natural images.
+- `photo`: RealESRGAN_x4plus for photos and mixed natural images.
+- `general`: Real-ESRGAN general v3 with denoise blending for noisy or compressed inputs.
+- `anime`: RealESRGAN_x4plus_anime_6B for illustration, anime, and drawn line work.
+- `conservative`: Lanczos resize plus mild sharpening for exact geometry, text, logos, and cases where AI detail should be avoided.
 
 Background `model` values:
 

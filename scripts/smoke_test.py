@@ -25,7 +25,7 @@ def main() -> int:
         files={"image": ("smoke.png", buffer, "image/png")},
         data={
             "scale": "8",
-            "mode": "conservative",
+            "mode": "auto",
             "face_enhance": "false",
             "denoise": "0.55",
             "tile": "256",
@@ -35,6 +35,7 @@ def main() -> int:
         timeout=30,
     )
     response.raise_for_status()
+    assert response.headers["X-Upscaler-Engine"].startswith("Auto:"), response.headers["X-Upscaler-Engine"]
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (512, 384), out.size
 
