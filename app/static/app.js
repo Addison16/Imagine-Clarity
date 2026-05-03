@@ -10,6 +10,7 @@ const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
 const toolPanels = document.querySelectorAll("[data-tool-panel]");
+const infoTips = document.querySelectorAll(".info-tip");
 const steps = document.querySelectorAll(".step");
 const beforeImg = document.querySelector("#before");
 const afterImg = document.querySelector("#after");
@@ -76,6 +77,15 @@ function setStatus(message, state = "ready", detail = "") {
 function setRuntime(message, state = "neutral") {
   runtimeChip.textContent = message;
   runtimeChip.className = `runtime-badge ${state}`.trim();
+}
+
+function closeInfoTips(exceptTip = null) {
+  infoTips.forEach((tip) => {
+    if (tip !== exceptTip) {
+      tip.dataset.open = "false";
+      tip.setAttribute("aria-expanded", "false");
+    }
+  });
 }
 
 function setStep(index) {
@@ -332,6 +342,24 @@ function toggleCompare() {
 fileInput.addEventListener("change", () => setFile(fileInput.files[0]));
 
 toolInputs.forEach((input) => input.addEventListener("change", syncToolUi));
+
+infoTips.forEach((tip) => {
+  tip.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const shouldOpen = tip.dataset.open !== "true";
+    closeInfoTips(tip);
+    tip.dataset.open = shouldOpen ? "true" : "false";
+    tip.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+  });
+});
+
+document.addEventListener("click", () => closeInfoTips());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeInfoTips();
+  }
+});
 
 denoise.addEventListener("input", updateDenoiseValue);
 edgeRefine.addEventListener("input", updateEdgeRefineValue);

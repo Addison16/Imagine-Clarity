@@ -103,7 +103,7 @@
                 <label class="field">
                   <span class="label help-label">
                     Processing source
-                    <span class="info-tip" tabindex="0" aria-label="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed." data-tip="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed.">i</span>
+                    <button class="info-tip" type="button" aria-label="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed." aria-expanded="false" data-tip="Auto uses the GPU when available, then falls back to CPU. Choose CPU for consistency or GPU for speed.">i</button>
                   </span>
                   <select id="upscale-device" class="device-select" name="upscale_device">
                     <option value="auto" selected>Auto select</option>
@@ -116,7 +116,7 @@
                   <span class="label-row">
                     <span class="help-label">
                       Noise reduction
-                      <span class="info-tip" tabindex="0" aria-label="Higher values reduce compression noise before enhancement. Lower values keep more original texture." data-tip="Higher values reduce compression noise before enhancement. Lower values keep more original texture.">i</span>
+                      <button class="info-tip" type="button" aria-label="Higher values reduce compression noise before enhancement. Lower values keep more original texture." aria-expanded="false" data-tip="Higher values reduce compression noise before enhancement. Lower values keep more original texture.">i</button>
                     </span>
                     <output id="denoise-value" for="denoise">0.55</output>
                   </span>
@@ -126,7 +126,7 @@
                 <label class="field">
                   <span class="label help-label">
                     Processing tile size
-                    <span class="info-tip" tabindex="0" aria-label="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available." data-tip="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available.">i</span>
+                    <button class="info-tip" type="button" aria-label="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available." aria-expanded="false" data-tip="Smaller tiles use less memory and help large images finish. Larger tiles can be faster when memory is available.">i</button>
                   </span>
                   <select id="tile" name="tile">
                     <option value="128">128</option>
@@ -142,7 +142,7 @@
                   <span class="switch-visual" aria-hidden="true"></span>
                   <span class="help-label">
                     Restore faces
-                    <span class="info-tip" tabindex="0" aria-label="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images." data-tip="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images.">i</span>
+                    <button class="info-tip" type="button" aria-label="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images." aria-expanded="false" data-tip="Adds a face-restoration pass for low-quality portraits. Leave off for logos, art, and text-heavy images.">i</button>
                   </span>
                 </label>
               </details>
@@ -186,7 +186,7 @@
                 <label class="field">
                   <span class="label help-label">
                     Processing source
-                    <span class="info-tip" tabindex="0" aria-label="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines." data-tip="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines.">i</span>
+                    <button class="info-tip" type="button" aria-label="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines." aria-expanded="false" data-tip="Auto uses CUDA for AI background models when available. CPU is slower but can be more predictable across machines.">i</button>
                   </span>
                   <select id="background-device" class="device-select" name="background_device">
                     <option value="auto" selected>Auto select</option>
@@ -199,7 +199,7 @@
                   <span class="label-row">
                     <span class="help-label">
                       Edge cleanup
-                      <span class="info-tip" tabindex="0" aria-label="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges." data-tip="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges.">i</span>
+                      <button class="info-tip" type="button" aria-label="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges." aria-expanded="false" data-tip="Controls how much the cut edge is refined. Lower values preserve detail; higher values clean rough edges.">i</button>
                     </span>
                     <output id="edge-refine-value" for="edge-refine">8</output>
                   </span>
@@ -210,7 +210,7 @@
                   <span class="label-row">
                     <span class="help-label">
                       Background similarity
-                      <span class="info-tip" tabindex="0" aria-label="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork." data-tip="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork.">i</span>
+                      <button class="info-tip" type="button" aria-label="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork." aria-expanded="false" data-tip="For logo mode, higher values remove more colors similar to the edge background. Lower values protect artwork.">i</button>
                     </span>
                     <output id="bg-tolerance-value" for="bg-tolerance">34</output>
                   </span>
@@ -222,7 +222,7 @@
                   <span class="switch-visual" aria-hidden="true"></span>
                   <span class="help-label">
                     Fine edge matting
-                    <span class="info-tip" tabindex="0" aria-label="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten." data-tip="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten.">i</span>
+                    <button class="info-tip" type="button" aria-label="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten." aria-expanded="false" data-tip="Improves soft edges like hair or fur. Turn off for hard-edged logos if details get eaten.">i</button>
                   </span>
                 </label>
 
@@ -231,7 +231,7 @@
                   <span class="switch-visual" aria-hidden="true"></span>
                   <span class="help-label">
                     Clean mask
-                    <span class="info-tip" tabindex="0" aria-label="Removes small mask noise after cutting. Disable it if very fine details disappear." data-tip="Removes small mask noise after cutting. Disable it if very fine details disappear.">i</span>
+                    <button class="info-tip" type="button" aria-label="Removes small mask noise after cutting. Disable it if very fine details disappear." aria-expanded="false" data-tip="Removes small mask noise after cutting. Disable it if very fine details disappear.">i</button>
                   </span>
                 </label>
 
@@ -240,7 +240,7 @@
                   <span class="switch-visual" aria-hidden="true"></span>
                   <span class="help-label">
                     Protect inside detail
-                    <span class="info-tip" tabindex="0" aria-label="Keeps enclosed artwork, lettering, and texture from being treated as background holes." data-tip="Keeps enclosed artwork, lettering, and texture from being treated as background holes.">i</span>
+                    <button class="info-tip" type="button" aria-label="Keeps enclosed artwork, lettering, and texture from being treated as background holes." aria-expanded="false" data-tip="Keeps enclosed artwork, lettering, and texture from being treated as background holes.">i</button>
                   </span>
                 </label>
 
@@ -249,7 +249,7 @@
                   <span class="switch-visual" aria-hidden="true"></span>
                   <span class="help-label">
                     Respect existing transparency
-                    <span class="info-tip" tabindex="0" aria-label="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets." data-tip="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets.">i</span>
+                    <button class="info-tip" type="button" aria-label="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets." aria-expanded="false" data-tip="Leaves already-transparent PNGs alone instead of re-cutting them. Best for stickers and downloaded transparent assets.">i</button>
                   </span>
                 </label>
               </details>
