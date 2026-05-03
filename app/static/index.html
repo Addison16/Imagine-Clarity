@@ -36,7 +36,7 @@
               <h2>Upload Image</h2>
             </summary>
             <label class="dropzone" id="dropzone">
-              <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp" />
+              <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp" multiple />
               <span class="drop-icon" aria-hidden="true"></span>
               <span id="file-label" class="drop-title">Drop your image here</span>
               <span id="file-meta" class="drop-copy">or click to browse</span>
@@ -50,6 +50,20 @@
               <span class="step-number">2</span>
               <h2>Basic Settings</h2>
             </summary>
+
+            <label class="field">
+              <span class="label">Preset</span>
+              <select id="preset">
+                <option value="smart" selected>Smart Auto</option>
+                <option value="logo">Logo or Sticker</option>
+                <option value="photo">Photo Detail</option>
+                <option value="artwork">Artwork or Illustration</option>
+                <option value="product">Product Cutout</option>
+                <option value="print">Print-Ready Upscale</option>
+                <option value="transparent-sticker">Transparent Sticker</option>
+              </select>
+              <span id="preset-note" class="field-note">Smart Auto keeps model detection enabled and chooses safer defaults.</span>
+            </label>
 
             <div class="field">
               <span class="label">Image action</span>
@@ -350,6 +364,14 @@
             <span id="engine-chip" class="mini-badge hidden">Engine</span>
           </header>
 
+          <div class="preview-toolbar" aria-label="Preview background">
+            <span>Preview BG</span>
+            <button class="preview-bg-button active" type="button" data-preview-bg="checker">Checker</button>
+            <button class="preview-bg-button" type="button" data-preview-bg="white">White</button>
+            <button class="preview-bg-button" type="button" data-preview-bg="gray">Gray</button>
+            <button class="preview-bg-button" type="button" data-preview-bg="dark">Black</button>
+          </div>
+
           <div class="preview-stage">
             <img id="after" alt="Processed result preview" />
 
@@ -373,7 +395,10 @@
             <div id="processing" class="processing hidden">
               <span class="spinner" aria-hidden="true"></span>
               <strong id="processing-label">Processing image...</strong>
-              <span>Large files may take a little longer.</span>
+              <span id="processing-detail">Large files may take a little longer.</span>
+              <div class="progress-track" aria-hidden="true">
+                <span id="progress-fill"></span>
+              </div>
             </div>
           </div>
 
@@ -388,6 +413,35 @@
               <button id="process-another" class="ghost-button" type="button">Process Another</button>
             </div>
           </footer>
+        </article>
+      </section>
+
+      <section class="utility-grid">
+        <article class="card utility-card">
+          <header class="utility-header">
+            <div>
+              <h2>Saved Jobs</h2>
+              <p>Recent outputs are saved in Docker storage.</p>
+            </div>
+            <button id="refresh-history" class="small-button" type="button">Refresh</button>
+          </header>
+          <div id="batch-results" class="batch-results hidden" aria-live="polite"></div>
+          <div id="history-list" class="history-list">
+            <p class="muted-copy">No saved jobs loaded yet.</p>
+          </div>
+        </article>
+
+        <article class="card utility-card">
+          <header class="utility-header">
+            <div>
+              <h2>Runtime Diagnostics</h2>
+              <p>Hardware, storage, and limit checks for this container.</p>
+            </div>
+            <button id="refresh-diagnostics" class="small-button" type="button">Refresh</button>
+          </header>
+          <div id="diagnostics-panel" class="diagnostics-panel">
+            <p class="muted-copy">Checking runtime...</p>
+          </div>
         </article>
       </section>
     </main>

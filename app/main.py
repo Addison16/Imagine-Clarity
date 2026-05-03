@@ -20,6 +20,7 @@ from app.background import (
     BackgroundOptions,
     remove_background,
 )
+from app.jobs import HISTORY_LIMIT, get_job, list_jobs, result_path, save_job_result, storage_summary
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -34,7 +35,7 @@ logger.setLevel(logging.INFO)
 app = FastAPI(
     title="Clarity Image Tools",
     description="Docker-hosted AI image upscaling and background removal.",
-    version="1.1.0",
+    version="1.2.0",
 )
 
 app.add_middleware(
@@ -63,7 +64,38 @@ def health() -> dict[str, object]:
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": ["upscale", "remove-background", "remove-background-upscale"],
+        "history_limit": HISTORY_LIMIT,
         "runtime": _runtime_info(),
+    }
+
+
+@app.get("/api/jobs")
+def api_jobs(limit: int = 25) -> dict[str, object]:
+    return {"jobs": list_jobs(limit)}
+
+
+@app.get("/api/results/{job_id}")
+def api_result(job_id: str) -> FileResponse:
+    path = result_path(job_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Result not found.")
+    job = get_job(job_id) or {}
+    return FileResponse(path, filename=str(job.get("filename") or path.name))
+
+
+@app.get("/api/diagnostics")
+def api_diagnostics() -> dict[str, object]:
+    runtime = _runtime_info()
+    return {
+        "status": "ok",
+        "runtime": runtime,
+        "storage": storage_summary(),
+        "limits": {
+            "max_upload_mb": MAX_UPLOAD_MB,
+            "max_image_dimension": MAX_IMAGE_DIMENSION,
+            "max_upscale_factor": MAX_UPSCALE_FACTOR,
+        },
+        "recommendations": _runtime_recommendations(runtime),
     }
 
 
@@ -121,11 +153,25 @@ async def api_upscale(
 
     stem = _safe_stem(image.filename)
     filename = f"{stem}-upscaled-{result.width}x{result.height}.{result.extension}"
+    job = save_job_result(
+        tool="upscale",
+        source_filename=image.filename,
+        output_filename=filename,
+        data=result.data,
+        input_metadata=metadata,
+        output_width=result.width,
+        output_height=result.height,
+        output_format=result.extension,
+        engine=result.engine,
+        settings=vars(options),
+    )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
         "X-Upscaler-Engine": result.engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
+        "X-Job-Id": str(job["id"]),
+        "X-Download-URL": str(job["download_url"]),
     }
 
     return StreamingResponse(
@@ -219,6 +265,21 @@ async def api_remove_background_upscale(
     stem = _safe_stem(image.filename)
     filename = f"{stem}-transparent-upscaled-{result.width}x{result.height}.{result.extension}"
     pipeline_engine = f"{background_result.engine} -> {result.engine}"
+    job = save_job_result(
+        tool="remove-background-upscale",
+        source_filename=image.filename,
+        output_filename=filename,
+        data=result.data,
+        input_metadata=metadata,
+        output_width=result.width,
+        output_height=result.height,
+        output_format=result.extension,
+        engine=pipeline_engine,
+        settings={
+            "background": vars(background_options),
+            "upscale": vars(upscale_options),
+        },
+    )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
         "X-Background-Engine": background_result.engine,
@@ -226,6 +287,8 @@ async def api_remove_background_upscale(
         "X-Pipeline-Engine": pipeline_engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
+        "X-Job-Id": str(job["id"]),
+        "X-Download-URL": str(job["download_url"]),
     }
 
     return StreamingResponse(
@@ -289,11 +352,25 @@ async def api_remove_background(
 
     stem = _safe_stem(image.filename)
     filename = f"{stem}-transparent.{result.extension}"
+    job = save_job_result(
+        tool="remove-background",
+        source_filename=image.filename,
+        output_filename=filename,
+        data=result.data,
+        input_metadata=metadata,
+        output_width=result.width,
+        output_height=result.height,
+        output_format=result.extension,
+        engine=result.engine,
+        settings=vars(options),
+    )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
         "X-Background-Engine": result.engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
+        "X-Job-Id": str(job["id"]),
+        "X-Download-URL": str(job["download_url"]),
     }
 
     return StreamingResponse(
@@ -409,6 +486,28 @@ def _runtime_info() -> dict[str, object]:
     except Exception as exc:
         info["onnxruntime_error"] = str(exc)
     return info
+
+
+def _runtime_recommendations(runtime: dict[str, object]) -> list[str]:
+    recommendations = [
+        "Leave hardware selectors on Auto unless you are troubleshooting a specific job.",
+        "Use CPU for maximum compatibility, small graphics, and simple logo cutouts.",
+    ]
+    if runtime.get("cuda_available"):
+        recommendations.insert(
+            1,
+            "Use NVIDIA GPU for 4x or 8x upscales, large photos, all-in-one jobs, and batches.",
+        )
+    else:
+        recommendations.insert(
+            1,
+            "No CUDA GPU is visible inside the container, so GPU selections will fall back or error.",
+        )
+
+    providers = runtime.get("onnx_providers") or []
+    if "CUDAExecutionProvider" not in providers:
+        recommendations.append("Background removal is not seeing ONNX CUDA; use CPU or rebuild with GPU dependencies.")
+    return recommendations
 
 
 @app.exception_handler(HTTPException)

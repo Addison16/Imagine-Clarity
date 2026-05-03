@@ -8,6 +8,8 @@ const runLabel = document.querySelector("#run-label");
 const statusEl = document.querySelector("#status");
 const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
+const presetSelect = document.querySelector("#preset");
+const presetNote = document.querySelector("#preset-note");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
 const scaleInputs = document.querySelectorAll('input[name="scale"]');
 const sizingInputs = document.querySelectorAll('input[name="sizing"]');
@@ -26,6 +28,8 @@ const inputChip = document.querySelector("#input-chip");
 const engineChip = document.querySelector("#engine-chip");
 const processing = document.querySelector("#processing");
 const processingLabel = document.querySelector("#processing-label");
+const processingDetail = document.querySelector("#processing-detail");
+const progressFill = document.querySelector("#progress-fill");
 const outputFormat = document.querySelector("#output-format");
 const resultTitle = document.querySelector("#result-title");
 const denoise = document.querySelector("#denoise");
@@ -49,8 +53,16 @@ const compareAfter = document.querySelector("#compare-after");
 const compareSlider = document.querySelector("#compare-slider");
 const targetWidthInput = document.querySelector("#target-width");
 const targetHeightInput = document.querySelector("#target-height");
+const previewBgButtons = document.querySelectorAll("[data-preview-bg]");
+const previewStages = document.querySelectorAll(".preview-stage");
+const historyList = document.querySelector("#history-list");
+const batchResults = document.querySelector("#batch-results");
+const refreshHistory = document.querySelector("#refresh-history");
+const diagnosticsPanel = document.querySelector("#diagnostics-panel");
+const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
 
 let selectedFile = null;
+let selectedFiles = [];
 let beforeUrl = null;
 let afterUrl = null;
 let busyTimer = null;
@@ -75,6 +87,114 @@ const toleranceDefaults = {
   preserve: "24",
   balanced: "34",
   strong: "48",
+};
+
+const presets = {
+  smart: {
+    note: "Smart Auto keeps model detection enabled and chooses safer defaults.",
+    tool: null,
+    mode: "auto",
+    model: "auto",
+    cut: "balanced",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.55",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  logo: {
+    note: "Best for logos, decals, text graphics, and shirt art with hard edges.",
+    tool: "remove-background-upscale",
+    mode: "conservative",
+    model: "logo",
+    cut: "preserve",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.3",
+    alphaMatting: false,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  photo: {
+    note: "Best for natural photos where detail enhancement matters.",
+    tool: "upscale",
+    mode: "photo",
+    model: "accurate",
+    cut: "balanced",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.45",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  artwork: {
+    note: "Best for drawings, illustrations, flat colors, and line art.",
+    tool: "upscale",
+    mode: "anime",
+    model: "anime",
+    cut: "balanced",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.35",
+    alphaMatting: false,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  product: {
+    note: "Best for product images that need a transparent cutout and cleaner output.",
+    tool: "remove-background-upscale",
+    mode: "photo",
+    model: "accurate",
+    cut: "balanced",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.5",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  print: {
+    note: "Best when preparing a larger clean image for print or mockups.",
+    tool: "upscale",
+    mode: "auto",
+    model: "auto",
+    cut: "balanced",
+    scale: "8",
+    sizing: "scale",
+    denoise: "0.55",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  "transparent-sticker": {
+    note: "Best for transparent PNG stickers and graphic assets that already have an alpha channel.",
+    tool: "remove-background-upscale",
+    mode: "conservative",
+    model: "logo",
+    cut: "preserve",
+    scale: "4",
+    sizing: "scale",
+    denoise: "0.25",
+    alphaMatting: false,
+    postProcess: false,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
 };
 
 function setStatus(message, state = "ready", detail = "") {
@@ -109,6 +229,7 @@ function setBusyStatus(label) {
   const startedAt = Date.now();
   clearBusyStatus();
   processing.classList.remove("hidden");
+  setProgress(8, "Preparing job...");
   const render = () => {
     const elapsed = Math.floor((Date.now() - startedAt) / 1000);
     const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
@@ -127,6 +248,12 @@ function clearBusyStatus() {
     busyTimer = null;
   }
   processing.classList.add("hidden");
+  setProgress(0, "Large files may take a little longer.");
+}
+
+function setProgress(percent, detail = "") {
+  progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  if (detail) processingDetail.textContent = detail;
 }
 
 function revoke(url) {
@@ -137,6 +264,17 @@ function formatBytes(bytes) {
   if (!Number.isFinite(bytes)) return "";
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function fileExtension(file) {
@@ -157,18 +295,97 @@ function selectedSizingMode() {
   return document.querySelector('input[name="sizing"]:checked')?.value || "scale";
 }
 
+function setRadioValue(name, value) {
+  const input = document.querySelector(`input[name="${name}"][value="${value}"]`);
+  if (input) input.checked = true;
+}
+
+function setCheckbox(id, checked) {
+  const input = document.querySelector(`#${id}`);
+  if (input) input.checked = Boolean(checked);
+}
+
+function applyPreset(key, fromUser = false) {
+  const preset = presets[key] || presets.smart;
+  if (preset.tool) setRadioValue("tool", preset.tool);
+  setRadioValue("scale", preset.scale);
+  setRadioValue("sizing", preset.sizing);
+  setRadioValue("cut_mode", preset.cut);
+  document.querySelector("#mode").value = preset.mode;
+  bgModel.value = preset.model;
+  denoise.value = preset.denoise;
+  outputFormat.value = preset.format;
+  setCheckbox("alpha-matting", preset.alphaMatting);
+  setCheckbox("post-process-mask", preset.postProcess);
+  setCheckbox("preserve-interior", preset.preserveInterior);
+  setCheckbox("respect-alpha", preset.respectAlpha);
+  updateDenoiseValue();
+  applyCutPreset(false);
+  syncToolUi();
+  syncSizingUi(key === "print");
+  presetNote.textContent = preset.note;
+  if (selectedFile && fromUser) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings("Preset updated. Start when ready.");
+  }
+}
+
+function applySmartPresetForFile(file, size) {
+  const name = file.name.toLowerCase();
+  const isLarge = Math.max(size.width, size.height) >= 1800;
+  const looksLikeGraphic =
+    name.includes("logo") ||
+    name.includes("sticker") ||
+    name.includes("shirt") ||
+    name.includes("graphic");
+  const looksLikeProduct = name.includes("product") || name.includes("mockup") || name.includes("item");
+
+  if (looksLikeProduct) {
+    applyPreset("product");
+    return;
+  }
+  if (looksLikeGraphic) {
+    setRadioValue("tool", "remove-background-upscale");
+    document.querySelector("#mode").value = "auto";
+    bgModel.value = "auto";
+    setRadioValue("cut_mode", "balanced");
+    setRadioValue("scale", isLarge ? "2" : "4");
+    setRadioValue("sizing", "scale");
+    denoise.value = "0.45";
+    setCheckbox("alpha-matting", false);
+    setCheckbox("post-process-mask", true);
+    setCheckbox("preserve-interior", true);
+    setCheckbox("respect-alpha", true);
+    updateDenoiseValue();
+    applyCutPreset(false);
+    syncToolUi();
+    syncSizingUi(false);
+    presetNote.textContent = "Smart Auto detected a graphic-style image and kept safer cutout/upscale defaults.";
+    return;
+  }
+  setRadioValue("tool", "upscale");
+  document.querySelector("#mode").value = "auto";
+  setRadioValue("scale", isLarge ? "2" : "4");
+  setRadioValue("sizing", "scale");
+  denoise.value = "0.55";
+  updateDenoiseValue();
+  syncToolUi();
+  syncSizingUi(false);
+  presetNote.textContent = "Smart Auto detected a photo-style image and left upscale type on Auto.";
+}
+
 function numericInputValue(input) {
   const value = Number(input.value);
   return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
 }
 
-function targetOutputSize() {
-  if (!selectedImageSize) return null;
+function targetOutputSize(size = selectedImageSize) {
+  if (!size) return null;
   let width = numericInputValue(targetWidthInput);
   let height = numericInputValue(targetHeightInput);
   if (!width && !height) return null;
-  if (!width) width = Math.round(selectedImageSize.width * (height / selectedImageSize.height));
-  if (!height) height = Math.round(selectedImageSize.height * (width / selectedImageSize.width));
+  if (!width) width = Math.round(size.width * (height / size.height));
+  if (!height) height = Math.round(size.height * (width / size.width));
   return { width: Math.max(1, width), height: Math.max(1, height) };
 }
 
@@ -279,6 +496,23 @@ async function loadRuntime() {
   }
 }
 
+async function setFiles(files) {
+  const list = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
+  if (!list.length) {
+    setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, or WEBP.");
+    return;
+  }
+  selectedFiles = list;
+  batchResults.classList.add("hidden");
+  batchResults.replaceChildren();
+  await setFile(list[0]);
+  if (list.length > 1) {
+    fileLabel.textContent = `${list.length} images selected`;
+    fileMeta.textContent = `First preview: ${list[0].name}`;
+    setStatus("Ready", "ready", `${list.length} images loaded. Batch processing will run one image at a time.`);
+  }
+}
+
 async function setFile(file) {
   if (!file) return;
 
@@ -293,6 +527,7 @@ async function setFile(file) {
   }
 
   selectedFile = file;
+  if (!selectedFiles.length) selectedFiles = [file];
   selectedImageSize = null;
   revoke(beforeUrl);
   revoke(afterUrl);
@@ -316,6 +551,9 @@ async function setFile(file) {
   try {
     const size = await imageSize(beforeUrl);
     selectedImageSize = size;
+    if (presetSelect.value === "smart") {
+      applySmartPresetForFile(file, size);
+    }
     fillTargetDefaults(false);
     beforeMeta.textContent = `${size.width} x ${size.height} | ${fileExtension(file)} | ${formatBytes(file.size)}`;
     fileMeta.textContent = `${size.width} x ${size.height} | ${formatBytes(file.size)}`;
@@ -421,6 +659,7 @@ function clearResultOnly() {
 
 function clearWorkspace() {
   selectedFile = null;
+  selectedFiles = [];
   selectedImageSize = null;
   revoke(beforeUrl);
   revoke(afterUrl);
@@ -440,6 +679,8 @@ function clearWorkspace() {
   inputChip.classList.add("hidden");
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
+  batchResults.classList.add("hidden");
+  batchResults.replaceChildren();
   runButton.disabled = true;
   compareToggle.textContent = "Compare";
   setStep(0);
@@ -458,12 +699,12 @@ function updateBgToleranceValue() {
   bgToleranceValue.textContent = bgTolerance.value;
 }
 
-function applyCutPreset() {
+function applyCutPreset(notify = true) {
   edgeRefine.value = edgeDefaults[selectedCutMode()] || edgeDefaults.balanced;
   bgTolerance.value = toleranceDefaults[selectedCutMode()] || toleranceDefaults.balanced;
   updateEdgeRefineValue();
   updateBgToleranceValue();
-  if (selectedFile) {
+  if (selectedFile && notify) {
     clearResultOnly();
     setStatus("Ready", "ready", "Cut strength updated. Start when ready.");
   }
@@ -488,7 +729,135 @@ function toggleCompare() {
   }
 }
 
-fileInput.addEventListener("change", () => setFile(fileInput.files[0]));
+function setPreviewBackground(value = "checker") {
+  previewBgButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.previewBg === value);
+  });
+  previewStages.forEach((stage) => {
+    stage.classList.remove("bg-white", "bg-gray", "bg-dark");
+    if (value !== "checker") stage.classList.add(`bg-${value}`);
+  });
+}
+
+function renderBatchResults(results) {
+  batchResults.replaceChildren();
+  if (!results.length) {
+    batchResults.classList.add("hidden");
+    return;
+  }
+  batchResults.classList.remove("hidden");
+  results.forEach((result) => {
+    const row = document.createElement("div");
+    row.className = `batch-row ${result.ok ? "" : "error"}`.trim();
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = result.name;
+    const meta = document.createElement("span");
+    meta.textContent = result.ok ? result.summary : result.error;
+    copy.append(title, meta);
+    row.append(copy);
+    if (result.ok) {
+      const link = document.createElement("a");
+      link.href = result.downloadUrl;
+      link.download = result.filename;
+      link.textContent = "Download";
+      row.append(link);
+    }
+    batchResults.append(row);
+  });
+}
+
+function renderHistory(jobs) {
+  historyList.replaceChildren();
+  if (!jobs.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted-copy";
+    empty.textContent = "No saved jobs yet. Process an image and the output will appear here.";
+    historyList.append(empty);
+    return;
+  }
+  jobs.forEach((job) => {
+    const row = document.createElement("div");
+    row.className = "job-row";
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = job.filename || job.source_filename || "Processed image";
+    const meta = document.createElement("span");
+    const output = job.output || {};
+    meta.textContent =
+      `${job.tool || "job"} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`;
+    copy.append(title, meta);
+    const link = document.createElement("a");
+    link.href = job.download_url;
+    link.download = job.filename || "result.png";
+    link.textContent = "Download";
+    row.append(copy, link);
+    historyList.append(row);
+  });
+}
+
+async function loadHistory() {
+  try {
+    const response = await fetch("/api/jobs?limit=10", { cache: "no-store" });
+    if (!response.ok) throw new Error("history failed");
+    const body = await response.json();
+    renderHistory(body.jobs || []);
+  } catch {
+    historyList.innerHTML = '<p class="muted-copy">Could not load saved jobs.</p>';
+  }
+}
+
+function renderDiagnostics(data) {
+  const runtime = data.runtime || {};
+  const storage = data.storage || {};
+  const limits = data.limits || {};
+  const rows = [
+    ["Hardware", runtime.cuda_available ? `NVIDIA GPU: ${runtime.cuda_device || "CUDA"}` : "CPU runtime"],
+    ["Available devices", Array.isArray(runtime.available_devices) ? runtime.available_devices.join(", ") : "cpu"],
+    ["ONNX providers", Array.isArray(runtime.onnx_providers) ? runtime.onnx_providers.join(", ") : "Unknown"],
+    ["Saved outputs", `${storage.saved_jobs || 0} jobs | ${formatBytes(storage.saved_bytes || 0)}`],
+    ["Limits", `${limits.max_upload_mb || maxUploadMb} MB upload | ${limits.max_image_dimension || maxImageDimension}px max side | ${limits.max_upscale_factor || maxUpscaleFactor}x max upscale`],
+  ];
+  diagnosticsPanel.replaceChildren();
+  rows.forEach(([label, value]) => {
+    const row = document.createElement("div");
+    row.className = "diagnostic-row";
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = label;
+    const meta = document.createElement("span");
+    meta.textContent = value;
+    copy.append(title, meta);
+    row.append(copy);
+    diagnosticsPanel.append(row);
+  });
+  (data.recommendations || []).forEach((text) => {
+    const row = document.createElement("div");
+    row.className = "diagnostic-row";
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = "Recommendation";
+    const meta = document.createElement("span");
+    meta.textContent = text;
+    copy.append(title, meta);
+    row.append(copy);
+    diagnosticsPanel.append(row);
+  });
+}
+
+async function loadDiagnostics() {
+  try {
+    const response = await fetch("/api/diagnostics", { cache: "no-store" });
+    if (!response.ok) throw new Error("diagnostics failed");
+    renderDiagnostics(await response.json());
+  } catch {
+    diagnosticsPanel.innerHTML = '<p class="muted-copy">Could not load diagnostics.</p>';
+  }
+}
+
+fileInput.addEventListener("change", () => setFiles(fileInput.files));
+
+presetSelect.addEventListener("change", () => applyPreset(presetSelect.value, true));
 
 toolInputs.forEach((input) => input.addEventListener("change", syncToolUi));
 
@@ -562,6 +931,12 @@ cutModeInputs.forEach((input) => input.addEventListener("change", applyCutPreset
 processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
 compareSlider.addEventListener("input", () => setComparePosition(compareSlider.value));
+refreshHistory.addEventListener("click", loadHistory);
+refreshDiagnostics.addEventListener("click", loadDiagnostics);
+
+previewBgButtons.forEach((button) => {
+  button.addEventListener("click", () => setPreviewBackground(button.dataset.previewBg));
+});
 
 dropzone.addEventListener("dragover", (event) => {
   event.preventDefault();
@@ -575,31 +950,19 @@ dropzone.addEventListener("dragleave", () => {
 dropzone.addEventListener("drop", (event) => {
   event.preventDefault();
   dropzone.classList.remove("dragging");
-  setFile(event.dataTransfer.files[0]);
+  setFiles(event.dataTransfer.files);
 });
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  if (!selectedFile) return;
-  if (!validateResolutionForCurrentSettings(null)) return;
+function endpointForTool(tool) {
+  if (tool === "remove-background") return "/api/remove-background";
+  if (tool === "remove-background-upscale") return "/api/remove-background-upscale";
+  return "/api/upscale";
+}
 
-  runButton.disabled = true;
-  resultActions.classList.add("hidden");
-  afterEmpty.classList.add("hidden");
-  compareStage.classList.add("hidden");
-  engineChip.classList.add("hidden");
-  compareActive = false;
-  compareToggle.textContent = "Compare";
-  setStep(2);
-
+function buildPayload(file, size = selectedImageSize) {
   const tool = selectedTool();
-  let actionLabel = "Enhancing image";
-  if (tool === "remove-background") actionLabel = "Removing background";
-  if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
-  setBusyStatus(actionLabel);
-
   const payload = new FormData(form);
-  payload.set("image", selectedFile);
+  payload.set("image", file);
   payload.delete("tool");
   payload.delete("sizing");
   if (tool === "remove-background-upscale") {
@@ -612,12 +975,14 @@ form.addEventListener("submit", async (event) => {
   payload.delete("target_width");
   payload.delete("target_height");
   if (usesUpscale() && selectedSizingMode() === "target") {
-    const target = targetOutputSize();
-    if (targetWidthInput.value) payload.set("target_width", target.width);
-    if (targetHeightInput.value) payload.set("target_height", target.height);
-    if (!targetWidthInput.value && !targetHeightInput.value && target) {
-      payload.set("target_width", target.width);
-      payload.set("target_height", target.height);
+    const target = targetOutputSize(size);
+    if (target) {
+      if (targetWidthInput.value) payload.set("target_width", target.width);
+      if (targetHeightInput.value) payload.set("target_height", target.height);
+      if (!targetWidthInput.value && !targetHeightInput.value) {
+        payload.set("target_width", target.width);
+        payload.set("target_height", target.height);
+      }
     }
   }
   if (tool !== "remove-background-upscale") {
@@ -633,51 +998,145 @@ form.addEventListener("submit", async (event) => {
   payload.set("post_process_mask", document.querySelector("#post-process-mask").checked ? "true" : "false");
   payload.set("preserve_interior", document.querySelector("#preserve-interior").checked ? "true" : "false");
   payload.set("respect_existing_alpha", document.querySelector("#respect-alpha").checked ? "true" : "false");
+  return payload;
+}
+
+function filenameFromResponse(response, fallback) {
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filenameMatch = disposition.match(/filename="([^"]+)"/);
+  return filenameMatch ? filenameMatch[1] : fallback;
+}
+
+function showResult(blob, response, fallbackName) {
+  revoke(afterUrl);
+  afterUrl = URL.createObjectURL(blob);
+  afterImg.src = afterUrl;
+  afterEmpty.classList.add("hidden");
+
+  const width = response.headers.get("X-Output-Width");
+  const height = response.headers.get("X-Output-Height");
+  const engine =
+    response.headers.get("X-Pipeline-Engine") ||
+    response.headers.get("X-Upscaler-Engine") ||
+    response.headers.get("X-Background-Engine") ||
+    "";
+  const extension = outputFormat.value.toUpperCase();
+  afterMeta.textContent = `${width} x ${height} | ${extension} | ${formatBytes(blob.size)}`;
+  resultSummary.textContent = `${width} x ${height} ${extension}`;
+
+  if (engine) {
+    engineChip.textContent = engine;
+    engineChip.className = `mini-badge ${engine.includes("CUDA") ? "good" : ""}`.trim();
+    engineChip.classList.remove("hidden");
+  }
+
+  const downloadUrl = response.headers.get("X-Download-URL") || afterUrl;
+  const filename = filenameFromResponse(response, fallbackName || "result.png");
+  resultDownload.href = downloadUrl;
+  resultDownload.download = filename;
+  resultDownload.textContent = `Download ${extension}`;
+  resultActions.classList.remove("hidden");
+  return {
+    width,
+    height,
+    extension,
+    engine,
+    downloadUrl,
+    filename,
+    summary: `${width} x ${height} ${extension} | ${formatBytes(blob.size)}`,
+  };
+}
+
+async function imageSizeForFile(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    return await imageSize(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!selectedFile) return;
+  if (!validateResolutionForCurrentSettings(null)) return;
+
+  const filesToProcess = selectedFiles.length ? selectedFiles : [selectedFile];
+  runButton.disabled = true;
+  resultActions.classList.add("hidden");
+  afterEmpty.classList.add("hidden");
+  compareStage.classList.add("hidden");
+  engineChip.classList.add("hidden");
+  compareActive = false;
+  compareToggle.textContent = "Compare";
+  setStep(2);
+
+  const tool = selectedTool();
+  let actionLabel = "Enhancing image";
+  if (tool === "remove-background") actionLabel = "Removing background";
+  if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
+  setBusyStatus(filesToProcess.length > 1 ? `Batch ${actionLabel.toLowerCase()}` : actionLabel);
 
   try {
-    let endpoint = "/api/upscale";
-    if (tool === "remove-background") endpoint = "/api/remove-background";
-    if (tool === "remove-background-upscale") endpoint = "/api/remove-background-upscale";
-    const response = await fetch(endpoint, {
-      method: "POST",
-      body: payload,
-    });
+    const endpoint = endpointForTool(tool);
+    const results = [];
 
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.error || `Request failed with ${response.status}`);
+    for (let index = 0; index < filesToProcess.length; index += 1) {
+      const file = filesToProcess[index];
+      const size = index === 0 && selectedImageSize ? selectedImageSize : await imageSizeForFile(file);
+      setProgress(
+        Math.round((index / filesToProcess.length) * 100),
+        `Processing ${index + 1} of ${filesToProcess.length}: ${file.name}`,
+      );
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: buildPayload(file, size),
+      });
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        results.push({
+          ok: false,
+          name: file.name,
+          error: body.error || `Request failed with ${response.status}`,
+        });
+        continue;
+      }
+
+      const blob = await response.blob();
+      const shown = showResult(blob, response, `${file.name}-result.${outputFormat.value}`);
+      const item = {
+        ok: true,
+        name: file.name,
+        ...shown,
+      };
+      results.push(item);
+      setProgress(
+        Math.round(((index + 1) / filesToProcess.length) * 100),
+        `Finished ${index + 1} of ${filesToProcess.length}`,
+      );
     }
 
-    const blob = await response.blob();
-    revoke(afterUrl);
-    afterUrl = URL.createObjectURL(blob);
-    afterImg.src = afterUrl;
-    afterEmpty.classList.add("hidden");
+    renderBatchResults(filesToProcess.length > 1 ? results : []);
+    await loadHistory();
+    await loadDiagnostics();
 
-    const width = response.headers.get("X-Output-Width");
-    const height = response.headers.get("X-Output-Height");
-    const engine =
-      response.headers.get("X-Pipeline-Engine") ||
-      response.headers.get("X-Upscaler-Engine") ||
-      response.headers.get("X-Background-Engine") ||
-      "";
-    const extension = outputFormat.value.toUpperCase();
-    afterMeta.textContent = `${width} x ${height} | ${extension} | ${formatBytes(blob.size)}`;
-    resultSummary.textContent = `${width} x ${height} ${extension}`;
-
-    if (engine) {
-      engineChip.textContent = engine;
-      engineChip.className = `mini-badge ${engine.includes("CUDA") ? "good" : ""}`.trim();
-      engineChip.classList.remove("hidden");
+    const failures = results.filter((result) => !result.ok);
+    if (!results.some((result) => result.ok)) {
+      throw new Error(failures[0]?.error || "No images were processed.");
     }
 
-    const disposition = response.headers.get("Content-Disposition") || "";
-    const filenameMatch = disposition.match(/filename="([^"]+)"/);
-    resultDownload.href = afterUrl;
-    resultDownload.download = filenameMatch ? filenameMatch[1] : "result.png";
-    resultDownload.textContent = `Download ${extension}`;
-    resultActions.classList.remove("hidden");
-    setStatus("Complete", "complete", "Done. Your image is ready to download.");
+    if (failures.length) {
+      setStatus(
+        "Complete",
+        "complete",
+        `${results.length - failures.length} finished, ${failures.length} failed. Check saved jobs for downloads.`,
+      );
+    } else if (filesToProcess.length > 1) {
+      setStatus("Complete", "complete", `Batch complete. ${results.length} images are ready to download.`);
+    } else {
+      setStatus("Complete", "complete", "Done. Your image is ready to download.");
+    }
   } catch (error) {
     afterEmpty.classList.remove("hidden");
     setStep(selectedFile ? 1 : 0);
@@ -695,6 +1154,9 @@ updateDenoiseValue();
 updateEdgeRefineValue();
 updateBgToleranceValue();
 setComparePosition(compareSlider.value);
+setPreviewBackground("checker");
 syncSizingUi();
 syncToolUi();
 loadRuntime();
+loadHistory();
+loadDiagnostics();

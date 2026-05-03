@@ -50,6 +50,24 @@ chmod +x ./scripts/start-prebuilt.sh
 ./scripts/start-prebuilt.sh
 ```
 
+Suggested public image tags after publishing:
+
+- `ghcr.io/addison16/imagine-clarity:latest`: default CPU-compatible image.
+- `ghcr.io/addison16/imagine-clarity:cpu`: explicit CPU-compatible image.
+- `ghcr.io/addison16/imagine-clarity:gpu`: NVIDIA CUDA image for hosts with Docker GPU support.
+
+For most users, the easiest setup is:
+
+```powershell
+docker compose -f docker-compose.prebuilt.yml up -d
+```
+
+NVIDIA users can use:
+
+```powershell
+docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml up -d
+```
+
 ## Approach
 
 The default neural path uses Real-ESRGAN because it is designed for practical blind super-resolution: unknown blur, noise, compression artifacts, and mixed real-world degradation. The app also includes:
@@ -62,6 +80,10 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Conservative`: Lanczos plus mild sharpening when exact geometry, text, or logos matter more than generated texture.
 - `Remove BG`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
+- `Batch processing`: select multiple images and the UI processes them one at a time with per-file download links.
+- `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download.
+- `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
+- `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
 
 AI upscalers infer detail that is not present in the source. For maximum fidelity, compare neural modes against `Conservative` on images with text, product labels, legal/medical imagery, or identity-sensitive faces.
 
@@ -134,6 +156,8 @@ http://localhost:8794
 
 The first neural upscale downloads model weights into the `upscaler-models` Docker volume. Conservative mode runs immediately.
 
+Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. This keeps downloads available in the Saved Jobs panel even after the browser refreshes.
+
 ## Hardware Auto-Detection
 
 This app is packaged with a safe default: CPU mode works without special hardware, and the startup scripts use NVIDIA acceleration only when it can be verified.
@@ -204,6 +228,24 @@ curl.exe -X POST http://localhost:8794/api/remove-background-upscale `
   --output transparent-upscaled.png
 ```
 
+List saved jobs:
+
+```powershell
+curl.exe http://localhost:8794/api/jobs
+```
+
+Download a saved result:
+
+```powershell
+curl.exe -L http://localhost:8794/api/results/JOB_ID --output result.png
+```
+
+Runtime diagnostics:
+
+```powershell
+curl.exe http://localhost:8794/api/diagnostics
+```
+
 ## Settings
 
 - `HOST_PORT`: host port, default `8794`.
@@ -213,6 +255,8 @@ curl.exe -X POST http://localhost:8794/api/remove-background-upscale `
 - GPU mode uses `Dockerfile.gpu`, CUDA-enabled PyTorch wheels, and `onnxruntime-gpu` so both upscaling and background removal can use the NVIDIA GPU. It requires an NVIDIA driver plus Docker's NVIDIA runtime.
 - `REMBG_DEVICE`: optional override for background removal, defaults to `UPSCALER_DEVICE`. Use `cpu` to force background removal to CPU.
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
+- `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
+- `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
 
 Per-job processing source:
 

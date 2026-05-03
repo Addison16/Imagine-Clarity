@@ -16,6 +16,11 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - Auto upscale mode that chooses a conservative path for text, logos, alpha images, and target-size jobs.
 - Background removal with multiple model/cut options and detail-preserving cleanup for logos and graphics.
 - All-in-One mode: background removal followed by upscale to a selected scale or target resolution.
+- Batch processing from the UI by selecting multiple image files.
+- Saved Jobs panel backed by persisted Docker storage.
+- Runtime Diagnostics panel backed by `/api/diagnostics`.
+- Presets for Smart Auto, logo/sticker, photo, artwork, product cutout, print-ready upscale, and transparent sticker workflows.
+- Preview background controls for checkerboard, white, gray, and black result inspection.
 - PNG, JPEG, and WEBP output for upscaling.
 - PNG and WEBP output for background removal and All-in-One so transparency is preserved.
 - Docker Compose files for CPU and GPU-oriented runs.
@@ -32,6 +37,7 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - `docker-compose.prebuilt.yml`: pull-and-run prebuilt image setup.
 - `docker-compose.prebuilt.gpu.yml`: pull-and-run GPU prebuilt image setup.
 - `app/main.py`: FastAPI routes, validation, health endpoint, and API responses.
+- `app/jobs.py`: saved output files and JSON job history.
 - `app/upscaler.py`: upscale logic, hardware selection, target sizing, and background removal.
 - `app/static/index.html`: web UI markup.
 - `app/static/app.js`: web UI behavior and form/API wiring.
@@ -70,13 +76,19 @@ The local GPU-tagged image is:
 clarity-image-tools:gpu
 ```
 
+Saved outputs are stored inside the container at:
+
+```text
+/tmp/upscaler/outputs
+```
+
 ## Useful Verification Commands
 
 ```powershell
 docker ps --filter name=clarity-upscaler
 Invoke-RestMethod -Uri http://localhost:8794/health | ConvertTo-Json -Depth 5
 Get-Content scripts\smoke_test.py | docker exec -i clarity-upscaler python - http://127.0.0.1:8794
-python -m py_compile app\main.py app\upscaler.py scripts\smoke_test.py
+python -m py_compile app\main.py app\upscaler.py app\background.py app\jobs.py scripts\smoke_test.py
 node --check app\static\app.js
 ```
 
@@ -88,11 +100,11 @@ node --check app\static\app.js
 - Added help text with CPU/GPU recommendations.
 - Added All-in-One mode in the UI and `/api/remove-background-upscale` in the backend.
 - Updated smoke tests to cover the All-in-One pipeline.
+- Added saved jobs, persisted output downloads, runtime diagnostics, presets, batch UI processing, and preview background controls.
 
 ## Known Limits And Next Improvements
 
-- The app does not save uploaded images, processed outputs, or user history by default.
+- The app saves processed outputs and job metadata, but it still does not save original uploaded files by default.
 - Background removal can still need tuning for unusual artwork, transparent edges, or busy images.
 - AMD and Intel GPU acceleration are not currently implemented; CPU fallback is expected.
-- A future improvement could add persistent job history, saved presets, and optional output folders.
 - A future improvement could add a real progress stream for long-running upscale/background jobs.

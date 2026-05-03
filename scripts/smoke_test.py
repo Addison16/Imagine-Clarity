@@ -12,6 +12,9 @@ def main() -> int:
     health = requests.get(f"{base_url}/health", timeout=10)
     health.raise_for_status()
     assert health.json()["max_image_dimension"] == 16384, health.json()
+    diagnostics = requests.get(f"{base_url}/api/diagnostics", timeout=10)
+    diagnostics.raise_for_status()
+    assert diagnostics.json()["status"] == "ok", diagnostics.text
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -37,8 +40,13 @@ def main() -> int:
     )
     response.raise_for_status()
     assert response.headers["X-Upscaler-Engine"].startswith("Auto:"), response.headers["X-Upscaler-Engine"]
+    assert response.headers["X-Job-Id"], response.headers
+    assert response.headers["X-Download-URL"].startswith("/api/results/"), response.headers
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (512, 384), out.size
+    saved = requests.get(f"{base_url}{response.headers['X-Download-URL']}", timeout=10)
+    saved.raise_for_status()
+    assert len(saved.content) == len(response.content), (len(saved.content), len(response.content))
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -201,6 +209,10 @@ def main() -> int:
     out = Image.open(io.BytesIO(response.content))
     assert out.mode == "RGBA", out.mode
     assert out.size == (64, 64), out.size
+
+    jobs = requests.get(f"{base_url}/api/jobs?limit=5", timeout=10)
+    jobs.raise_for_status()
+    assert jobs.json()["jobs"], jobs.text
 
     print("smoke ok")
     return 0

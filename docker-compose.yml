@@ -11,6 +11,7 @@ services:
       MODEL_DIR: /models
       U2NET_HOME: /models/rembg
       STORAGE_DIR: /tmp/upscaler
+      HISTORY_LIMIT: "${HISTORY_LIMIT:-100}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-64}"
       MAX_IMAGE_DIMENSION: "${MAX_IMAGE_DIMENSION:-16384}"
       UPSCALER_DEVICE: "${UPSCALER_DEVICE:-auto}"
