@@ -58,6 +58,7 @@ const previewStages = document.querySelectorAll(".preview-stage");
 const historyList = document.querySelector("#history-list");
 const batchResults = document.querySelector("#batch-results");
 const refreshHistory = document.querySelector("#refresh-history");
+const clearHistory = document.querySelector("#clear-history");
 const diagnosticsPanel = document.querySelector("#diagnostics-panel");
 const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
 
@@ -583,7 +584,7 @@ function selectedCutMode() {
 }
 
 function actionText() {
-  if (selectedTool() === "remove-background") return "Remove Background";
+  if (selectedTool() === "remove-background") return "Remove Back Ground";
   if (selectedTool() === "remove-background-upscale") return "Remove Back Ground + Upscale";
   return "Upscale Image";
 }
@@ -791,7 +792,15 @@ function renderHistory(jobs) {
     link.href = job.download_url;
     link.download = job.filename || "result.png";
     link.textContent = "Download";
-    row.append(copy, link);
+    const actions = document.createElement("div");
+    actions.className = "job-actions";
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "small-button danger-button";
+    deleteButton.type = "button";
+    deleteButton.textContent = "Delete";
+    deleteButton.addEventListener("click", () => deleteSavedJob(job));
+    actions.append(link, deleteButton);
+    row.append(copy, actions);
     historyList.append(row);
   });
 }
@@ -804,6 +813,51 @@ async function loadHistory() {
     renderHistory(body.jobs || []);
   } catch {
     historyList.innerHTML = '<p class="muted-copy">Could not load saved jobs.</p>';
+  }
+}
+
+async function deleteSavedJob(job) {
+  const name = job.filename || job.source_filename || "this saved job";
+  const confirmed = window.confirm(
+    `Delete "${name}" from Saved Jobs? This removes the saved output file and its history entry.`,
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed with ${response.status}`);
+    }
+    setStatus("Ready", "ready", "Saved job deleted.");
+    await loadHistory();
+    await loadDiagnostics();
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Could not delete the saved job.");
+  }
+}
+
+async function clearSavedJobs() {
+  const confirmed = window.confirm(
+    "Clear all recent saved jobs? This removes every saved output file and history entry from Docker storage.",
+  );
+  if (!confirmed) return;
+
+  try {
+    const response = await fetch("/api/jobs", {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Clear failed with ${response.status}`);
+    }
+    setStatus("Ready", "ready", "Recent saved jobs cleared.");
+    await loadHistory();
+    await loadDiagnostics();
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Could not clear saved jobs.");
   }
 }
 
@@ -932,6 +986,7 @@ processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
 compareSlider.addEventListener("input", () => setComparePosition(compareSlider.value));
 refreshHistory.addEventListener("click", loadHistory);
+clearHistory.addEventListener("click", clearSavedJobs);
 refreshDiagnostics.addEventListener("click", loadDiagnostics);
 
 previewBgButtons.forEach((button) => {
@@ -1073,8 +1128,8 @@ form.addEventListener("submit", async (event) => {
 
   const tool = selectedTool();
   let actionLabel = "Enhancing image";
-  if (tool === "remove-background") actionLabel = "Removing background";
-  if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
+  if (tool === "remove-background") actionLabel = "Removing back ground";
+  if (tool === "remove-background-upscale") actionLabel = "Removing back ground and upscaling";
   setBusyStatus(filesToProcess.length > 1 ? `Batch ${actionLabel.toLowerCase()}` : actionLabel);
 
   try {

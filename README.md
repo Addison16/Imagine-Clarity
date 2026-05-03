@@ -81,7 +81,7 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 - `Batch processing`: select multiple images and the UI processes them one at a time with per-file download links.
-- `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download.
+- `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
 - `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
 - `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
 
@@ -238,6 +238,18 @@ Download a saved result:
 
 ```powershell
 curl.exe -L http://localhost:8794/api/results/JOB_ID --output result.png
+```
+
+Delete one saved job:
+
+```powershell
+curl.exe -X DELETE http://localhost:8794/api/jobs/JOB_ID
+```
+
+Clear all recent saved jobs:
+
+```powershell
+curl.exe -X DELETE http://localhost:8794/api/jobs
 ```
 
 Runtime diagnostics:

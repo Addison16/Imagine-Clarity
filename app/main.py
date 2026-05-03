@@ -20,7 +20,16 @@ from app.background import (
     BackgroundOptions,
     remove_background,
 )
-from app.jobs import HISTORY_LIMIT, get_job, list_jobs, result_path, save_job_result, storage_summary
+from app.jobs import (
+    HISTORY_LIMIT,
+    clear_jobs,
+    delete_job,
+    get_job,
+    list_jobs,
+    result_path,
+    save_job_result,
+    storage_summary,
+)
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -42,7 +51,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -72,6 +81,19 @@ def health() -> dict[str, object]:
 @app.get("/api/jobs")
 def api_jobs(limit: int = 25) -> dict[str, object]:
     return {"jobs": list_jobs(limit)}
+
+
+@app.delete("/api/jobs")
+def api_clear_jobs() -> dict[str, object]:
+    return clear_jobs()
+
+
+@app.delete("/api/jobs/{job_id}")
+def api_delete_job(job_id: str) -> dict[str, object]:
+    result = delete_job(job_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Saved job not found.")
+    return result
 
 
 @app.get("/api/results/{job_id}")

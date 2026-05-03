@@ -770,6 +770,17 @@ input[type="number"]:focus {
   transform: translateY(-1px);
 }
 
+.danger-button {
+  border-color: #fecaca;
+  background: #ffffff;
+  color: var(--error);
+}
+
+.danger-button:hover {
+  border-color: var(--error);
+  background: #fef2f2;
+}
+
 .status-detail {
   min-height: 18px;
   margin: 10px 0 0;
@@ -1114,6 +1125,15 @@ input[type="number"]:focus {
   margin-bottom: 12px;
 }
 
+.utility-actions,
+.job-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .utility-header p {
   margin: 5px 0 0;
   color: var(--muted);
@@ -1176,6 +1196,10 @@ input[type="number"]:focus {
   font-size: 12px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.job-actions .small-button {
+  min-height: 34px;
 }
 
 .job-row a:hover,
@@ -1280,6 +1304,8 @@ input[type="number"]:focus {
   }
 
   .result-buttons,
+  .utility-actions,
+  .job-actions,
   .secondary-button,
   .ghost-button {
     width: 100%;

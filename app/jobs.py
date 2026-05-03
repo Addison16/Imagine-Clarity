@@ -69,6 +69,45 @@ def list_jobs(limit: int = 25) -> list[dict[str, Any]]:
     return jobs[: max(1, min(int(limit), HISTORY_LIMIT))]
 
 
+def delete_job(job_id: str) -> dict[str, Any] | None:
+    with _history_lock:
+        jobs = _read_history_unlocked()
+        deleted_job: dict[str, Any] | None = None
+        kept_jobs: list[dict[str, Any]] = []
+        for job in jobs:
+            if job.get("id") == job_id:
+                deleted_job = job
+            else:
+                kept_jobs.append(job)
+
+        if deleted_job is None:
+            return None
+
+        deleted_files = 1 if _delete_stored_file_unlocked(deleted_job) else 0
+        _write_history_unlocked(kept_jobs)
+        return {
+            "deleted": True,
+            "deleted_jobs": 1,
+            "deleted_files": deleted_files,
+            "job": deleted_job,
+        }
+
+
+def clear_jobs() -> dict[str, Any]:
+    with _history_lock:
+        jobs = _read_history_unlocked()
+        deleted_files = 0
+        for job in jobs:
+            if _delete_stored_file_unlocked(job):
+                deleted_files += 1
+        _write_history_unlocked([])
+        return {
+            "deleted": True,
+            "deleted_jobs": len(jobs),
+            "deleted_files": deleted_files,
+        }
+
+
 def get_job(job_id: str) -> dict[str, Any] | None:
     for job in _read_history():
         if job.get("id") == job_id:
@@ -109,10 +148,7 @@ def _append_history(entry: dict[str, Any]) -> None:
         jobs = _read_history_unlocked()
         jobs.insert(0, entry)
         jobs = jobs[:HISTORY_LIMIT]
-        HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = HISTORY_PATH.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
-        tmp_path.replace(HISTORY_PATH)
+        _write_history_unlocked(jobs)
 
 
 def _read_history() -> list[dict[str, Any]]:
@@ -130,6 +166,27 @@ def _read_history_unlocked() -> list[dict[str, Any]]:
     if not isinstance(data, list):
         return []
     return [job for job in data if isinstance(job, dict)]
+
+
+def _write_history_unlocked(jobs: list[dict[str, Any]]) -> None:
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = HISTORY_PATH.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(jobs, indent=2), encoding="utf-8")
+    tmp_path.replace(HISTORY_PATH)
+
+
+def _delete_stored_file_unlocked(job: dict[str, Any]) -> bool:
+    stored_filename = str(job.get("stored_filename", ""))
+    if not stored_filename or Path(stored_filename).name != stored_filename:
+        return False
+    path = OUTPUT_DIR / stored_filename
+    try:
+        if path.exists() and path.is_file():
+            path.unlink()
+            return True
+    except OSError:
+        return False
+    return False
 
 
 def _safe_filename(filename: str) -> str:

@@ -423,7 +423,10 @@
               <h2>Saved Jobs</h2>
               <p>Recent outputs are saved in Docker storage.</p>
             </div>
-            <button id="refresh-history" class="small-button" type="button">Refresh</button>
+            <div class="utility-actions">
+              <button id="refresh-history" class="small-button" type="button">Refresh</button>
+              <button id="clear-history" class="small-button danger-button" type="button">Clear Recent</button>
+            </div>
           </header>
           <div id="batch-results" class="batch-results hidden" aria-live="polite"></div>
           <div id="history-list" class="history-list">
