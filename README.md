@@ -61,6 +61,7 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Face restore`: optional GFPGAN pass for low-quality faces.
 - `Conservative`: Lanczos plus mild sharpening when exact geometry, text, or logos matter more than generated texture.
 - `Remove BG`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
+- `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 
 AI upscalers infer detail that is not present in the source. For maximum fidelity, compare neural modes against `Conservative` on images with text, product labels, legal/medical imagery, or identity-sensitive faces.
 
@@ -185,6 +186,22 @@ curl.exe -X POST http://localhost:8794/api/remove-background `
   -F "respect_existing_alpha=true" `
   -F "output_format=png" `
   --output transparent.png
+```
+
+Remove background, then upscale in one request:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/remove-background-upscale `
+  -F "image=@input.jpg" `
+  -F "model=auto" `
+  -F "cut_mode=balanced" `
+  -F "scale=4" `
+  -F "mode=auto" `
+  -F "target_width=2400" `
+  -F "background_device=auto" `
+  -F "upscale_device=auto" `
+  -F "output_format=png" `
+  --output transparent-upscaled.png
 ```
 
 ## Settings

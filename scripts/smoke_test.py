@@ -137,6 +137,41 @@ def main() -> int:
     assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
     assert out.getpixel((45, 35))[3] > 240, out.getpixel((45, 35))
 
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/remove-background-upscale",
+        files={"image": ("combo-logo.png", buffer, "image/png")},
+        data={
+            "scale": "2",
+            "mode": "auto",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "upscale_device": "cpu",
+            "target_width": "180",
+            "target_height": "140",
+            "model": "logo",
+            "cut_mode": "balanced",
+            "alpha_matting": "false",
+            "edge_refine": "8",
+            "background_tolerance": "34",
+            "background_device": "cpu",
+            "post_process_mask": "true",
+            "preserve_interior": "true",
+            "respect_existing_alpha": "true",
+            "output_format": "png",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    assert "X-Pipeline-Engine" in response.headers, response.headers
+    out = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    assert out.size == (180, 140), out.size
+    assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
+    assert out.getpixel((90, 70))[3] > 220, out.getpixel((90, 70))
+
     subject = Image.new("RGB", (64, 64), "#e8eef6")
     draw = ImageDraw.Draw(subject)
     draw.ellipse((18, 10, 46, 50), fill="#c2410c")

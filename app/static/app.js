@@ -198,7 +198,7 @@ function validateResolutionForCurrentSettings(validDetail = null) {
     return false;
   }
 
-  if (selectedTool() === "upscale") {
+  if (usesUpscale()) {
     let outputWidth;
     let outputHeight;
 
@@ -332,12 +332,22 @@ function selectedTool() {
   return document.querySelector('input[name="tool"]:checked').value;
 }
 
+function usesUpscale() {
+  return selectedTool() === "upscale" || selectedTool() === "remove-background-upscale";
+}
+
+function usesBackgroundRemoval() {
+  return selectedTool() === "remove-background" || selectedTool() === "remove-background-upscale";
+}
+
 function selectedCutMode() {
   return document.querySelector('input[name="cut_mode"]:checked')?.value || "balanced";
 }
 
 function actionText() {
-  return selectedTool() === "remove-background" ? "Remove Background" : "Upscale Image";
+  if (selectedTool() === "remove-background") return "Remove Background";
+  if (selectedTool() === "remove-background-upscale") return "Remove BG + Upscale";
+  return "Upscale Image";
 }
 
 function syncRunLabel() {
@@ -359,11 +369,15 @@ function syncSizingUi(forceDefaults = false) {
 function syncToolUi() {
   const tool = selectedTool();
   toolPanels.forEach((panel) => {
-    panel.classList.toggle("hidden", panel.dataset.toolPanel !== tool);
+    const shouldShow =
+      panel.dataset.toolPanel === tool ||
+      (tool === "remove-background-upscale" &&
+        (panel.dataset.toolPanel === "upscale" || panel.dataset.toolPanel === "remove-background"));
+    panel.classList.toggle("hidden", !shouldShow);
   });
 
   outputFormat.replaceChildren();
-  const allowedFormats = tool === "remove-background" ? ["png", "webp"] : ["png", "jpeg", "webp"];
+  const allowedFormats = usesBackgroundRemoval() ? ["png", "webp"] : ["png", "jpeg", "webp"];
   formatOptions
     .filter((option) => allowedFormats.includes(option.value))
     .forEach((option) => {
@@ -375,7 +389,13 @@ function syncToolUi() {
   outputFormat.value = "png";
 
   syncRunLabel();
-  resultTitle.textContent = tool === "remove-background" ? "Transparent Result" : "Enhanced Result";
+  if (tool === "remove-background") {
+    resultTitle.textContent = "Transparent Result";
+  } else if (tool === "remove-background-upscale") {
+    resultTitle.textContent = "Transparent Enhanced Result";
+  } else {
+    resultTitle.textContent = "Enhanced Result";
+  }
   if (!afterUrl) {
     afterMeta.textContent = "No result yet";
   } else {
@@ -573,18 +593,25 @@ form.addEventListener("submit", async (event) => {
   setStep(2);
 
   const tool = selectedTool();
-  const actionLabel = tool === "remove-background" ? "Removing background" : "Enhancing image";
+  let actionLabel = "Enhancing image";
+  if (tool === "remove-background") actionLabel = "Removing background";
+  if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
   setBusyStatus(actionLabel);
 
   const payload = new FormData(form);
   payload.set("image", selectedFile);
   payload.delete("tool");
   payload.delete("sizing");
-  payload.delete("upscale_device");
-  payload.delete("background_device");
+  if (tool === "remove-background-upscale") {
+    payload.set("upscale_device", upscaleDevice.value);
+    payload.set("background_device", backgroundDevice.value);
+  } else {
+    payload.delete("upscale_device");
+    payload.delete("background_device");
+  }
   payload.delete("target_width");
   payload.delete("target_height");
-  if (tool === "upscale" && selectedSizingMode() === "target") {
+  if (usesUpscale() && selectedSizingMode() === "target") {
     const target = targetOutputSize();
     if (targetWidthInput.value) payload.set("target_width", target.width);
     if (targetHeightInput.value) payload.set("target_height", target.height);
@@ -593,7 +620,11 @@ form.addEventListener("submit", async (event) => {
       payload.set("target_height", target.height);
     }
   }
-  payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
+  if (tool !== "remove-background-upscale") {
+    payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
+  } else {
+    payload.delete("device");
+  }
   payload.set("face_enhance", document.querySelector("#face").checked ? "true" : "false");
   payload.set("cut_mode", selectedCutMode());
   payload.set("alpha_matting", document.querySelector("#alpha-matting").checked ? "true" : "false");
@@ -604,7 +635,9 @@ form.addEventListener("submit", async (event) => {
   payload.set("respect_existing_alpha", document.querySelector("#respect-alpha").checked ? "true" : "false");
 
   try {
-    const endpoint = tool === "remove-background" ? "/api/remove-background" : "/api/upscale";
+    let endpoint = "/api/upscale";
+    if (tool === "remove-background") endpoint = "/api/remove-background";
+    if (tool === "remove-background-upscale") endpoint = "/api/remove-background-upscale";
     const response = await fetch(endpoint, {
       method: "POST",
       body: payload,
@@ -624,7 +657,10 @@ form.addEventListener("submit", async (event) => {
     const width = response.headers.get("X-Output-Width");
     const height = response.headers.get("X-Output-Height");
     const engine =
-      response.headers.get("X-Upscaler-Engine") || response.headers.get("X-Background-Engine") || "";
+      response.headers.get("X-Pipeline-Engine") ||
+      response.headers.get("X-Upscaler-Engine") ||
+      response.headers.get("X-Background-Engine") ||
+      "";
     const extension = outputFormat.value.toUpperCase();
     afterMeta.textContent = `${width} x ${height} | ${extension} | ${formatBytes(blob.size)}`;
     resultSummary.textContent = `${width} x ${height} ${extension}`;

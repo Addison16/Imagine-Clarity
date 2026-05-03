@@ -62,7 +62,7 @@ def health() -> dict[str, object]:
         "max_upscale_factor": MAX_UPSCALE_FACTOR,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
-        "tools": ["upscale", "remove-background"],
+        "tools": ["upscale", "remove-background", "remove-background-upscale"],
         "runtime": _runtime_info(),
     }
 
@@ -124,6 +124,106 @@ async def api_upscale(
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
         "X-Upscaler-Engine": result.engine,
+        "X-Output-Width": str(result.width),
+        "X-Output-Height": str(result.height),
+    }
+
+    return StreamingResponse(
+        io.BytesIO(result.data),
+        media_type=result.media_type,
+        headers=headers,
+    )
+
+
+@app.post("/api/remove-background-upscale")
+async def api_remove_background_upscale(
+    image: UploadFile = File(...),
+    scale: float = Form(4.0),
+    mode: str = Form("auto"),
+    face_enhance: bool = Form(False),
+    denoise: float = Form(0.55),
+    tile: int = Form(512),
+    upscale_device: str = Form("auto"),
+    target_width: int | None = Form(None),
+    target_height: int | None = Form(None),
+    model: str = Form("auto"),
+    cut_mode: str = Form("balanced"),
+    alpha_matting: bool = Form(True),
+    edge_refine: int = Form(8),
+    background_tolerance: int = Form(34),
+    background_device: str = Form("auto"),
+    post_process_mask: bool = Form(True),
+    preserve_interior: bool = Form(True),
+    respect_existing_alpha: bool = Form(True),
+    output_format: str = Form("png"),
+) -> StreamingResponse:
+    raw, metadata = await _read_validated_upload(image)
+
+    try:
+        output_format = output_format.lower().strip()
+        if output_format not in SUPPORTED_BG_FORMATS:
+            raise ValueError("All-in-one output format must be png or webp so transparency is preserved.")
+
+        background_options = BackgroundOptions(
+            model=model,
+            cut_mode=cut_mode,
+            alpha_matting=alpha_matting,
+            edge_refine=edge_refine,
+            background_tolerance=background_tolerance,
+            device=background_device,
+            post_process_mask=post_process_mask,
+            preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha,
+            output_format="png",
+        )
+        upscale_options = UpscaleOptions(
+            scale=scale,
+            mode=mode,
+            face_enhance=face_enhance,
+            denoise=denoise,
+            tile=tile,
+            device=upscale_device,
+            output_format=output_format,
+            target_width=target_width,
+            target_height=target_height,
+        )
+        _validate_upscale_resolution(metadata, upscale_options)
+
+        started = time.perf_counter()
+        logger.info(
+            "all-in-one start filename=%s input=%sx%s mode=%s alpha=%s background=%s upscale=%s",
+            image.filename,
+            metadata["width"],
+            metadata["height"],
+            metadata["mode"],
+            metadata["has_alpha"],
+            background_options,
+            upscale_options,
+        )
+        background_result = await run_in_threadpool(remove_background, raw, background_options)
+        result = await run_in_threadpool(upscale_image, background_result.data, upscale_options)
+        logger.info(
+            "all-in-one complete filename=%s output=%sx%s background_engine=%s upscale_engine=%s elapsed=%.1fs",
+            image.filename,
+            result.width,
+            result.height,
+            background_result.engine,
+            result.engine,
+            time.perf_counter() - started,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    stem = _safe_stem(image.filename)
+    filename = f"{stem}-transparent-upscaled-{result.width}x{result.height}.{result.extension}"
+    pipeline_engine = f"{background_result.engine} -> {result.engine}"
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Background-Engine": background_result.engine,
+        "X-Upscaler-Engine": result.engine,
+        "X-Pipeline-Engine": pipeline_engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
     }
