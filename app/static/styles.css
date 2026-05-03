@@ -403,8 +403,8 @@ h2 {
 }
 
 .info-panel {
-  width: 248px;
-  max-width: min(248px, calc(100vw - 42px));
+  width: 300px;
+  max-width: min(300px, calc(100vw - 42px));
   position: absolute;
   left: 0;
   top: calc(100% + 8px);

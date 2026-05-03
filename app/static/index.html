@@ -104,7 +104,7 @@
                   <span class="label help-label">
                     Processing source
                     <button class="info-tip" type="button" aria-label="Show help for processing source" aria-expanded="false" aria-controls="upscale-device-help">i</button>
-                    <span id="upscale-device-help" class="info-panel" role="tooltip" hidden>Auto checks for an NVIDIA CUDA GPU first, then falls back to CPU. Choose GPU for speed or CPU for the most predictable setup.</span>
+                    <span id="upscale-device-help" class="info-panel" role="tooltip" hidden>Recommended: Auto. Use GPU for 4x or 8x upscales, large files, and batch jobs. Use CPU for small images, maximum compatibility, or if the GPU runs out of memory.</span>
                   </span>
                   <select id="upscale-device" class="device-select" name="upscale_device">
                     <option value="auto" selected>Auto select</option>
@@ -129,7 +129,7 @@
                   <span class="label help-label">
                     Processing tile size
                     <button class="info-tip" type="button" aria-label="Show help for processing tile size" aria-expanded="false" aria-controls="tile-help">i</button>
-                    <span id="tile-help" class="info-panel" role="tooltip" hidden>Splits large images into smaller pieces while processing. Smaller tiles use less memory; larger tiles can be faster on stronger hardware.</span>
+                    <span id="tile-help" class="info-panel" role="tooltip" hidden>Recommended: 512 on a strong GPU, 256 on lower-memory GPUs, and 128 or 256 on CPU. Smaller tiles use less memory; larger tiles can be faster when enough GPU memory is available.</span>
                   </span>
                   <select id="tile" name="tile">
                     <option value="128">128</option>
@@ -191,7 +191,7 @@
                   <span class="label help-label">
                     Processing source
                     <button class="info-tip" type="button" aria-label="Show help for background processing source" aria-expanded="false" aria-controls="background-device-help">i</button>
-                    <span id="background-device-help" class="info-panel" role="tooltip" hidden>Auto uses CUDA for background AI models when it is available. CPU works everywhere Docker can run, but large images will take longer.</span>
+                    <span id="background-device-help" class="info-panel" role="tooltip" hidden>Recommended: Auto. Use GPU for large photos, complex edges, and repeated background jobs. Use CPU for small logos, simple graphics, compatibility, or if CUDA/GPU memory causes errors.</span>
                   </span>
                   <select id="background-device" class="device-select" name="background_device">
                     <option value="auto" selected>Auto select</option>
