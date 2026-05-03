@@ -10,6 +10,8 @@ const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
 const scaleInputs = document.querySelectorAll('input[name="scale"]');
+const sizingInputs = document.querySelectorAll('input[name="sizing"]');
+const sizePanels = document.querySelectorAll("[data-size-panel]");
 const toolPanels = document.querySelectorAll("[data-tool-panel]");
 const infoTips = document.querySelectorAll(".info-tip");
 const infoPanels = document.querySelectorAll(".info-panel");
@@ -45,6 +47,8 @@ const compareStage = document.querySelector("#compare-stage");
 const compareBefore = document.querySelector("#compare-before");
 const compareAfter = document.querySelector("#compare-after");
 const compareSlider = document.querySelector("#compare-slider");
+const targetWidthInput = document.querySelector("#target-width");
+const targetHeightInput = document.querySelector("#target-height");
 
 let selectedFile = null;
 let beforeUrl = null;
@@ -52,6 +56,7 @@ let afterUrl = null;
 let busyTimer = null;
 let maxUploadMb = 64;
 let maxImageDimension = 16384;
+let maxUpscaleFactor = 8;
 let selectedImageSize = null;
 let compareActive = false;
 
@@ -148,6 +153,41 @@ function selectedScale() {
   return Number(document.querySelector('input[name="scale"]:checked')?.value || 1);
 }
 
+function selectedSizingMode() {
+  return document.querySelector('input[name="sizing"]:checked')?.value || "scale";
+}
+
+function numericInputValue(input) {
+  const value = Number(input.value);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
+}
+
+function targetOutputSize() {
+  if (!selectedImageSize) return null;
+  let width = numericInputValue(targetWidthInput);
+  let height = numericInputValue(targetHeightInput);
+  if (!width && !height) return null;
+  if (!width) width = Math.round(selectedImageSize.width * (height / selectedImageSize.height));
+  if (!height) height = Math.round(selectedImageSize.height * (width / selectedImageSize.width));
+  return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
+function fillTargetDefaults(force = false) {
+  if (!selectedImageSize || selectedSizingMode() !== "target") return;
+  if (!force && (targetWidthInput.value || targetHeightInput.value)) return;
+
+  const scale = selectedScale();
+  let width = Math.round(selectedImageSize.width * scale);
+  let height = Math.round(selectedImageSize.height * scale);
+  const capRatio = Math.min(1, maxImageDimension / Math.max(width, height));
+  if (capRatio < 1) {
+    width = Math.round(width * capRatio);
+    height = Math.round(height * capRatio);
+  }
+  targetWidthInput.value = width;
+  targetHeightInput.value = height;
+}
+
 function validateResolutionForCurrentSettings(validDetail = null) {
   if (!selectedImageSize) return true;
 
@@ -159,15 +199,41 @@ function validateResolutionForCurrentSettings(validDetail = null) {
   }
 
   if (selectedTool() === "upscale") {
-    const scale = selectedScale();
-    const outputWidth = Math.round(width * scale);
-    const outputHeight = Math.round(height * scale);
+    let outputWidth;
+    let outputHeight;
+
+    if (selectedSizingMode() === "target") {
+      const target = targetOutputSize();
+      if (!target) {
+        runButton.disabled = true;
+        setStatus("Error", "error", "Enter a target width, target height, or both.");
+        return false;
+      }
+      outputWidth = target.width;
+      outputHeight = target.height;
+    } else {
+      const scale = selectedScale();
+      outputWidth = Math.round(width * scale);
+      outputHeight = Math.round(height * scale);
+    }
+
     if (outputWidth > maxImageDimension || outputHeight > maxImageDimension) {
       runButton.disabled = true;
       setStatus(
         "Error",
         "error",
         `Requested output would be ${outputWidth} x ${outputHeight}. Maximum output is ${resolutionLimitLabel()}. Choose a smaller output size.`,
+      );
+      return false;
+    }
+
+    const upscaleFactor = Math.max(outputWidth / width, outputHeight / height);
+    if (upscaleFactor > maxUpscaleFactor) {
+      runButton.disabled = true;
+      setStatus(
+        "Error",
+        "error",
+        `Requested output is ${upscaleFactor.toFixed(2)}x the source. Maximum upscale factor is ${maxUpscaleFactor}x.`,
       );
       return false;
     }
@@ -194,6 +260,7 @@ async function loadRuntime() {
     const health = await response.json();
     maxUploadMb = health.max_upload_mb || maxUploadMb;
     maxImageDimension = health.max_image_dimension || maxImageDimension;
+    maxUpscaleFactor = health.max_upscale_factor || maxUpscaleFactor;
     document.querySelector("#drop-note").textContent =
       `PNG, JPG, or WEBP supported. Max ${resolutionLimitLabel()} per side.`;
     const runtime = health.runtime || {};
@@ -249,6 +316,7 @@ async function setFile(file) {
   try {
     const size = await imageSize(beforeUrl);
     selectedImageSize = size;
+    fillTargetDefaults(false);
     beforeMeta.textContent = `${size.width} x ${size.height} | ${fileExtension(file)} | ${formatBytes(file.size)}`;
     fileMeta.textContent = `${size.width} x ${size.height} | ${formatBytes(file.size)}`;
   } catch {
@@ -274,6 +342,18 @@ function actionText() {
 
 function syncRunLabel() {
   runLabel.textContent = actionText();
+}
+
+function syncSizingUi(forceDefaults = false) {
+  const mode = selectedSizingMode();
+  sizePanels.forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.sizePanel !== mode);
+  });
+  if (mode === "target") fillTargetDefaults(forceDefaults);
+  if (selectedFile) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings("Sizing updated. Start when ready.");
+  }
 }
 
 function syncToolUi() {
@@ -401,6 +481,19 @@ scaleInputs.forEach((input) => {
   });
 });
 
+sizingInputs.forEach((input) => {
+  input.addEventListener("change", () => syncSizingUi(true));
+});
+
+[targetWidthInput, targetHeightInput].forEach((input) => {
+  input.addEventListener("input", () => {
+    if (selectedFile) {
+      clearResultOnly();
+      validateResolutionForCurrentSettings("Target resolution updated. Start when ready.");
+    }
+  });
+});
+
 infoTips.forEach((tip) => {
   tip.addEventListener("click", (event) => {
     event.preventDefault();
@@ -486,8 +579,20 @@ form.addEventListener("submit", async (event) => {
   const payload = new FormData(form);
   payload.set("image", selectedFile);
   payload.delete("tool");
+  payload.delete("sizing");
   payload.delete("upscale_device");
   payload.delete("background_device");
+  payload.delete("target_width");
+  payload.delete("target_height");
+  if (tool === "upscale" && selectedSizingMode() === "target") {
+    const target = targetOutputSize();
+    if (targetWidthInput.value) payload.set("target_width", target.width);
+    if (targetHeightInput.value) payload.set("target_height", target.height);
+    if (!targetWidthInput.value && !targetHeightInput.value && target) {
+      payload.set("target_width", target.width);
+      payload.set("target_height", target.height);
+    }
+  }
   payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
   payload.set("face_enhance", document.querySelector("#face").checked ? "true" : "false");
   payload.set("cut_mode", selectedCutMode());
@@ -554,5 +659,6 @@ updateDenoiseValue();
 updateEdgeRefineValue();
 updateBgToleranceValue();
 setComparePosition(compareSlider.value);
+syncSizingUi();
 syncToolUi();
 loadRuntime();

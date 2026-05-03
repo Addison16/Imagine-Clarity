@@ -40,6 +40,29 @@ def main() -> int:
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (512, 384), out.size
 
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/upscale",
+        files={"image": ("target.png", buffer, "image/png")},
+        data={
+            "scale": "4",
+            "mode": "conservative",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "device": "cpu",
+            "target_width": "320",
+            "target_height": "240",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    out = Image.open(io.BytesIO(response.content))
+    assert out.size == (320, 240), out.size
+
     too_large = Image.new("RGB", (2050, 2050), "#ffffff")
     buffer = io.BytesIO()
     too_large.save(buffer, format="PNG")
@@ -54,6 +77,27 @@ def main() -> int:
             "denoise": "0.55",
             "tile": "256",
             "device": "cpu",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    assert response.status_code == 400, response.text
+    assert "Maximum output resolution is 16384 x 16384" in response.text, response.text
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/upscale",
+        files={"image": ("target-too-large.png", buffer, "image/png")},
+        data={
+            "scale": "4",
+            "mode": "conservative",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "device": "cpu",
+            "target_width": "17000",
             "output_format": "png",
         },
         timeout=30,

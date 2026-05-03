@@ -23,6 +23,8 @@ class UpscaleOptions:
     tile: int = 256
     device: str = "auto"
     output_format: str = "png"
+    target_width: int | None = None
+    target_height: int | None = None
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,8 @@ MODEL_SPECS: dict[str, ModelSpec] = {
     ),
 }
 
+MAX_UPSCALE_FACTOR = 8.0
+
 MODE_LABELS = {
     "photo": "photo detail",
     "general": "balanced clean",
@@ -91,15 +95,30 @@ _cache_lock = threading.Lock()
 def upscale_image(raw: bytes, options: UpscaleOptions) -> UpscaleResult:
     options = _normalize_options(options)
     img = _open_image(raw)
+    target_size = _resolve_target_size(img, options)
+    process_scale = _target_process_scale(img, target_size) if target_size else options.scale
+    if target_size and process_scale > MAX_UPSCALE_FACTOR:
+        raise ValueError("Target resolution can be up to 8x the source image.")
+
     auto_selected = options.mode == "auto"
     if auto_selected:
         options = replace(options, mode=_select_auto_mode(img, options))
 
-    if options.mode == "conservative":
+    if target_size and process_scale <= 1.0:
+        output = _resize_to_target(img, target_size)
+        engine = "Target resize + unsharp mask (CPU)"
+    elif target_size and options.mode == "conservative":
+        output = _resize_to_target(img, target_size)
+        engine = "Target conservative resize + unsharp mask (CPU)"
+    elif options.mode == "conservative":
         output = _conservative_resize(img, options.scale)
         engine = "Lanczos + unsharp mask (CPU)"
     else:
-        output, engine = _neural_resize(img, options)
+        run_options = replace(options, scale=process_scale) if target_size else options
+        output, engine = _neural_resize(img, run_options)
+        if target_size and output.size != target_size:
+            output = _resize_to_target(output, target_size)
+            engine = f"{engine} + target resize"
 
     if auto_selected:
         engine = f"Auto: {MODE_LABELS[options.mode]} -> {engine}"
@@ -130,6 +149,9 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
     if output_format not in SUPPORTED_FORMATS:
         raise ValueError("Output format must be png, jpeg, jpg, or webp.")
 
+    target_width = _normalize_target_dimension(options.target_width, "Target width")
+    target_height = _normalize_target_dimension(options.target_height, "Target height")
+
     denoise = max(0.0, min(float(options.denoise), 1.0))
     tile = int(options.tile)
     if tile not in {0, 128, 256, 384, 512}:
@@ -143,7 +165,34 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
         tile=tile,
         device=_normalize_device(options.device),
         output_format=output_format,
+        target_width=target_width,
+        target_height=target_height,
     )
+
+
+def _normalize_target_dimension(value: int | None, label: str) -> int | None:
+    if value is None:
+        return None
+    value = int(value)
+    if value <= 0:
+        raise ValueError(f"{label} must be a positive number.")
+    return value
+
+
+def _resolve_target_size(img: Image.Image, options: UpscaleOptions) -> tuple[int, int] | None:
+    target_width = options.target_width
+    target_height = options.target_height
+    if target_width is None and target_height is None:
+        return None
+    if target_width is None:
+        target_width = round(img.width * (target_height / img.height))
+    if target_height is None:
+        target_height = round(img.height * (target_width / img.width))
+    return max(1, int(target_width)), max(1, int(target_height))
+
+
+def _target_process_scale(img: Image.Image, target_size: tuple[int, int]) -> float:
+    return max(target_size[0] / img.width, target_size[1] / img.height)
 
 
 def _select_auto_mode(img: Image.Image, options: UpscaleOptions) -> str:
@@ -209,6 +258,10 @@ def _open_image(raw: bytes) -> Image.Image:
 
 def _conservative_resize(img: Image.Image, scale: float) -> Image.Image:
     target = (round(img.width * scale), round(img.height * scale))
+    return _resize_to_target(img, target)
+
+
+def _resize_to_target(img: Image.Image, target: tuple[int, int]) -> Image.Image:
     resized = img.resize(target, Image.Resampling.LANCZOS)
     # A mild radius keeps text and line art cleaner without inventing new texture.
     return resized.filter(ImageFilter.UnsharpMask(radius=1.2, percent=70, threshold=4))
@@ -264,7 +317,7 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
     cv_img = _pil_to_cv(img, cv2)
     try:
         if options.face_enhance:
-            face_enhancer = _get_face_enhancer(device_key, int(options.scale), upsampler)
+            face_enhancer = _get_face_enhancer(device_key, max(1, round(options.scale)), upsampler)
             _, _, output = face_enhancer.enhance(
                 cv_img,
                 has_aligned=False,

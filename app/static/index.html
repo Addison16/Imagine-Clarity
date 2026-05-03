@@ -78,6 +78,20 @@
               </label>
 
               <div class="field">
+                <span class="label">Output sizing</span>
+                <div class="segmented" role="group" aria-label="Output sizing">
+                  <label>
+                    <input type="radio" name="sizing" value="scale" checked />
+                    <span>Scale</span>
+                  </label>
+                  <label>
+                    <input type="radio" name="sizing" value="target" />
+                    <span>Target</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="field" data-size-panel="scale">
                 <span class="label">Output size</span>
                 <div class="button-group" role="group" aria-label="Output size">
                   <label>
@@ -97,6 +111,21 @@
                     <span>8x</span>
                   </label>
                 </div>
+              </div>
+
+              <div class="field hidden" data-size-panel="target">
+                <span class="label">Target resolution</span>
+                <div class="target-grid">
+                  <label>
+                    <span>Width</span>
+                    <input id="target-width" name="target_width" type="number" min="1" max="16384" inputmode="numeric" placeholder="Width px" />
+                  </label>
+                  <label>
+                    <span>Height</span>
+                    <input id="target-height" name="target_height" type="number" min="1" max="16384" inputmode="numeric" placeholder="Height px" />
+                  </label>
+                </div>
+                <span class="field-note">Enter width, height, or both. One blank side preserves aspect ratio.</span>
               </div>
 
               <details class="advanced">

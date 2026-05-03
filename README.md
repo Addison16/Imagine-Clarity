@@ -213,6 +213,12 @@ Upscale `mode` values:
 - `anime`: RealESRGAN_x4plus_anime_6B for illustration, anime, and drawn line work.
 - `conservative`: Lanczos resize plus mild sharpening for exact geometry, text, logos, and cases where AI detail should be avoided.
 
+Upscale sizing:
+
+- Use `scale=2`, `3`, `4`, or `8` for multiplier-based output.
+- Or send `target_width`, `target_height`, or both to request a target resolution. If only one side is provided, the app preserves the source aspect ratio.
+- Target output is capped at `MAX_IMAGE_DIMENSION` and at an 8x upscale factor from the source image.
+
 Background `model` values:
 
 - `auto`: use the safe logo/sticker cutter when the image looks like a flat graphic on an edge-connected background; otherwise use ISNet.

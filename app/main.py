@@ -27,6 +27,7 @@ STATIC_DIR = APP_DIR / "static"
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
+MAX_UPSCALE_FACTOR = 8.0
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
 
@@ -58,6 +59,7 @@ def health() -> dict[str, object]:
         "status": "ok",
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_image_dimension": MAX_IMAGE_DIMENSION,
+        "max_upscale_factor": MAX_UPSCALE_FACTOR,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": ["upscale", "remove-background"],
@@ -75,6 +77,8 @@ async def api_upscale(
     tile: int = Form(512),
     device: str = Form("auto"),
     output_format: str = Form("png"),
+    target_width: int | None = Form(None),
+    target_height: int | None = Form(None),
 ) -> StreamingResponse:
     raw, metadata = await _read_validated_upload(image)
 
@@ -87,8 +91,10 @@ async def api_upscale(
             tile=tile,
             device=device,
             output_format=output_format,
+            target_width=target_width,
+            target_height=target_height,
         )
-        _validate_upscale_resolution(metadata, options.scale)
+        _validate_upscale_resolution(metadata, options)
         started = time.perf_counter()
         logger.info(
             "upscale start filename=%s input=%sx%s mode=%s alpha=%s options=%s",
@@ -232,17 +238,36 @@ def _validate_input_resolution(metadata: dict[str, object]) -> None:
         )
 
 
-def _validate_upscale_resolution(metadata: dict[str, object], scale: float) -> None:
+def _validate_upscale_resolution(metadata: dict[str, object], options: UpscaleOptions) -> None:
     width = int(metadata["width"])
     height = int(metadata["height"])
-    output_width = round(width * float(scale))
-    output_height = round(height * float(scale))
+    output_width, output_height = _resolve_upscale_output_size(width, height, options)
     if output_width > MAX_IMAGE_DIMENSION or output_height > MAX_IMAGE_DIMENSION:
         raise ValueError(
             f"Requested output would be {output_width} x {output_height}. "
             f"Maximum output resolution is {MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}. "
             "Choose a smaller output size or resize the source image first."
         )
+    upscale_factor = max(output_width / width, output_height / height)
+    if upscale_factor > MAX_UPSCALE_FACTOR:
+        raise ValueError(
+            f"Requested output would be {upscale_factor:.2f}x the source image. "
+            f"Maximum upscale factor is {MAX_UPSCALE_FACTOR:g}x."
+        )
+
+
+def _resolve_upscale_output_size(width: int, height: int, options: UpscaleOptions) -> tuple[int, int]:
+    target_width = options.target_width
+    target_height = options.target_height
+    if target_width is None and target_height is None:
+        scale = float(options.scale)
+        return round(width * scale), round(height * scale)
+
+    if target_width is None:
+        target_width = round(width * (target_height / height))
+    if target_height is None:
+        target_height = round(height * (target_width / width))
+    return max(1, int(target_width)), max(1, int(target_height))
 
 
 def _safe_stem(filename: str | None) -> str:
