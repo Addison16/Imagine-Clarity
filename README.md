@@ -191,6 +191,7 @@ curl.exe -X POST http://localhost:8794/api/remove-background `
 
 - `HOST_PORT`: host port, default `8794`.
 - `MAX_UPLOAD_MB`: upload limit, default `64`.
+- `MAX_IMAGE_DIMENSION`: maximum input side and generated output side, default `16384` for a 16K x 16K cap.
 - `UPSCALER_DEVICE`: `auto`, `cpu`, or `cuda`. The provided image installs CPU PyTorch wheels for broad compatibility.
 - GPU mode uses `Dockerfile.gpu`, CUDA-enabled PyTorch wheels, and `onnxruntime-gpu` so both upscaling and background removal can use the NVIDIA GPU. It requires an NVIDIA driver plus Docker's NVIDIA runtime.
 - `REMBG_DEVICE`: optional override for background removal, defaults to `UPSCALER_DEVICE`. Use `cpu` to force background removal to CPU.

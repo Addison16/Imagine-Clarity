@@ -9,6 +9,7 @@ const statusEl = document.querySelector("#status");
 const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
+const scaleInputs = document.querySelectorAll('input[name="scale"]');
 const toolPanels = document.querySelectorAll("[data-tool-panel]");
 const infoTips = document.querySelectorAll(".info-tip");
 const infoPanels = document.querySelectorAll(".info-panel");
@@ -50,6 +51,8 @@ let beforeUrl = null;
 let afterUrl = null;
 let busyTimer = null;
 let maxUploadMb = 64;
+let maxImageDimension = 16384;
+let selectedImageSize = null;
 let compareActive = false;
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
@@ -137,6 +140,44 @@ function fileExtension(file) {
   return file.type.replace("image/", "").toUpperCase();
 }
 
+function resolutionLimitLabel() {
+  return `${maxImageDimension.toLocaleString()} x ${maxImageDimension.toLocaleString()}`;
+}
+
+function selectedScale() {
+  return Number(document.querySelector('input[name="scale"]:checked')?.value || 1);
+}
+
+function validateResolutionForCurrentSettings(validDetail = null) {
+  if (!selectedImageSize) return true;
+
+  const { width, height } = selectedImageSize;
+  if (width > maxImageDimension || height > maxImageDimension) {
+    runButton.disabled = true;
+    setStatus("Error", "error", `Image is ${width} x ${height}. Maximum input resolution is ${resolutionLimitLabel()}.`);
+    return false;
+  }
+
+  if (selectedTool() === "upscale") {
+    const scale = selectedScale();
+    const outputWidth = Math.round(width * scale);
+    const outputHeight = Math.round(height * scale);
+    if (outputWidth > maxImageDimension || outputHeight > maxImageDimension) {
+      runButton.disabled = true;
+      setStatus(
+        "Error",
+        "error",
+        `Requested output would be ${outputWidth} x ${outputHeight}. Maximum output is ${resolutionLimitLabel()}. Choose a smaller output size.`,
+      );
+      return false;
+    }
+  }
+
+  runButton.disabled = false;
+  if (validDetail) setStatus("Ready", "ready", validDetail);
+  return true;
+}
+
 function imageSize(url) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -152,6 +193,9 @@ async function loadRuntime() {
     if (!response.ok) throw new Error("health failed");
     const health = await response.json();
     maxUploadMb = health.max_upload_mb || maxUploadMb;
+    maxImageDimension = health.max_image_dimension || maxImageDimension;
+    document.querySelector("#drop-note").textContent =
+      `PNG, JPG, or WEBP supported. Max ${resolutionLimitLabel()} per side.`;
     const runtime = health.runtime || {};
     if (runtime.cuda_available) {
       setRuntime(`GPU: ${runtime.cuda_device || "CUDA"}`, "good");
@@ -182,6 +226,7 @@ async function setFile(file) {
   }
 
   selectedFile = file;
+  selectedImageSize = null;
   revoke(beforeUrl);
   revoke(afterUrl);
   beforeUrl = URL.createObjectURL(file);
@@ -200,10 +245,10 @@ async function setFile(file) {
   fileMeta.textContent = "Ready to process";
   inputChip.textContent = fileExtension(file);
   inputChip.classList.remove("hidden");
-  runButton.disabled = false;
 
   try {
     const size = await imageSize(beforeUrl);
+    selectedImageSize = size;
     beforeMeta.textContent = `${size.width} x ${size.height} | ${fileExtension(file)} | ${formatBytes(file.size)}`;
     fileMeta.textContent = `${size.width} x ${size.height} | ${formatBytes(file.size)}`;
   } catch {
@@ -212,7 +257,7 @@ async function setFile(file) {
 
   afterMeta.textContent = "No result yet";
   setStep(1);
-  setStatus("Ready", "ready", "Image loaded. Choose your settings and start.");
+  validateResolutionForCurrentSettings("Image loaded. Choose your settings and start.");
 }
 
 function selectedTool() {
@@ -257,7 +302,7 @@ function syncToolUi() {
     clearResultOnly();
   }
   if (selectedFile) {
-    setStatus("Ready", "ready", "Settings updated. Start when ready.");
+    validateResolutionForCurrentSettings("Settings updated. Start when ready.");
   }
 }
 
@@ -276,6 +321,7 @@ function clearResultOnly() {
 
 function clearWorkspace() {
   selectedFile = null;
+  selectedImageSize = null;
   revoke(beforeUrl);
   revoke(afterUrl);
   beforeUrl = null;
@@ -346,6 +392,15 @@ fileInput.addEventListener("change", () => setFile(fileInput.files[0]));
 
 toolInputs.forEach((input) => input.addEventListener("change", syncToolUi));
 
+scaleInputs.forEach((input) => {
+  input.addEventListener("change", () => {
+    if (selectedFile) {
+      clearResultOnly();
+      validateResolutionForCurrentSettings("Output size updated. Start when ready.");
+    }
+  });
+});
+
 infoTips.forEach((tip) => {
   tip.addEventListener("click", (event) => {
     event.preventDefault();
@@ -413,6 +468,7 @@ dropzone.addEventListener("drop", (event) => {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!selectedFile) return;
+  if (!validateResolutionForCurrentSettings(null)) return;
 
   runButton.disabled = true;
   resultActions.classList.add("hidden");
@@ -487,7 +543,9 @@ form.addEventListener("submit", async (event) => {
     setStatus("Error", "error", error.message || "Something went wrong while processing the image.");
   } finally {
     clearBusyStatus();
-    runButton.disabled = false;
+    if (selectedFile && validateResolutionForCurrentSettings(null)) {
+      runButton.disabled = false;
+    }
     syncRunLabel();
   }
 });

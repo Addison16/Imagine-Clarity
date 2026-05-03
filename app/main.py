@@ -26,6 +26,7 @@ APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
 
@@ -56,6 +57,7 @@ def health() -> dict[str, object]:
     return {
         "status": "ok",
         "max_upload_mb": MAX_UPLOAD_MB,
+        "max_image_dimension": MAX_IMAGE_DIMENSION,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": ["upscale", "remove-background"],
@@ -86,6 +88,7 @@ async def api_upscale(
             device=device,
             output_format=output_format,
         )
+        _validate_upscale_resolution(metadata, options.scale)
         started = time.perf_counter()
         logger.info(
             "upscale start filename=%s input=%sx%s mode=%s alpha=%s options=%s",
@@ -209,10 +212,37 @@ async def _read_validated_upload(image: UploadFile) -> tuple[bytes, dict[str, ob
                 "mode": probe.mode,
                 "has_alpha": "A" in probe.getbands(),
             }
+            _validate_input_resolution(metadata)
             probe.verify()
     except (UnidentifiedImageError, OSError) as exc:
         raise HTTPException(status_code=400, detail="Unsupported or corrupted image.") from exc
     return raw, metadata
+
+
+def _validate_input_resolution(metadata: dict[str, object]) -> None:
+    width = int(metadata["width"])
+    height = int(metadata["height"])
+    if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Image is {width} x {height}. Maximum input resolution is "
+                f"{MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}."
+            ),
+        )
+
+
+def _validate_upscale_resolution(metadata: dict[str, object], scale: float) -> None:
+    width = int(metadata["width"])
+    height = int(metadata["height"])
+    output_width = round(width * float(scale))
+    output_height = round(height * float(scale))
+    if output_width > MAX_IMAGE_DIMENSION or output_height > MAX_IMAGE_DIMENSION:
+        raise ValueError(
+            f"Requested output would be {output_width} x {output_height}. "
+            f"Maximum output resolution is {MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}. "
+            "Choose a smaller output size or resize the source image first."
+        )
 
 
 def _safe_stem(filename: str | None) -> str:

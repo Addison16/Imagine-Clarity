@@ -11,6 +11,7 @@ def main() -> int:
     base_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8794"
     health = requests.get(f"{base_url}/health", timeout=10)
     health.raise_for_status()
+    assert health.json()["max_image_dimension"] == 16384, health.json()
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -38,6 +39,27 @@ def main() -> int:
     assert response.headers["X-Upscaler-Engine"].startswith("Auto:"), response.headers["X-Upscaler-Engine"]
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (512, 384), out.size
+
+    too_large = Image.new("RGB", (2050, 2050), "#ffffff")
+    buffer = io.BytesIO()
+    too_large.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/upscale",
+        files={"image": ("too-large.png", buffer, "image/png")},
+        data={
+            "scale": "8",
+            "mode": "conservative",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "device": "cpu",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    assert response.status_code == 400, response.text
+    assert "Maximum output resolution is 16384 x 16384" in response.text, response.text
 
     logo = Image.new("RGB", (90, 70), "white")
     draw = ImageDraw.Draw(logo)
