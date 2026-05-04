@@ -77,8 +77,8 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `General clean`: Real-ESRGAN general v3 with denoise blending for noisy or compressed images.
 - `Illustration/anime`: RealESRGAN_x4plus_anime_6B for flat colors and drawn line work.
 - `Face restore`: optional GFPGAN pass for low-quality faces.
-- `Conservative`: Lanczos plus mild sharpening when exact geometry, text, or logos matter more than generated texture.
-- `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. The default "Protect inside detail" cleanup keeps enclosed artwork from getting random missing spots inside the foreground.
+- `Conservative`: alpha-aware Lanczos plus mild sharpening when exact geometry, text, transparent PNGs, or logos matter more than generated texture.
+- `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 - `Batch processing`: select multiple images and the UI processes them one at a time with per-file download links.
 - `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
@@ -203,6 +203,9 @@ curl.exe -X POST http://localhost:8794/api/remove-background `
   -F "cut_mode=balanced" `
   -F "alpha_matting=true" `
   -F "edge_refine=8" `
+  -F "edge_trim=1" `
+  -F "fringe_cleanup=45" `
+  -F "inner_cleanup=25" `
   -F "background_tolerance=34" `
   -F "device=auto" `
   -F "post_process_mask=true" `
@@ -302,6 +305,12 @@ Background `model` values:
 - `biref-lite`: BiRefNet general-lite model.
 - `balanced`: U2Net general model.
 - `fast`: U2NetP lightweight preview model.
+
+Background refinement values:
+
+- `edge_trim`: 0-8 pixels. Removes a thin amount from the alpha edge to clear white or colored halos.
+- `fringe_cleanup`: 0-100. Targets background-colored fringe pixels close to transparent areas.
+- `inner_cleanup`: 0-100. Removes background-colored pockets connected to transparent space. Leave `preserve_interior=true` for logos and lettering; set it false only when you intentionally want more aggressive enclosed cleanup.
 
 ## Verify
 

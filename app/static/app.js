@@ -38,9 +38,15 @@ const upscaleDevice = document.querySelector("#upscale-device");
 const cutModeInputs = document.querySelectorAll('input[name="cut_mode"]');
 const edgeRefine = document.querySelector("#edge-refine");
 const edgeRefineValue = document.querySelector("#edge-refine-value");
+const edgeTrim = document.querySelector("#edge-trim");
+const edgeTrimValue = document.querySelector("#edge-trim-value");
+const fringeCleanup = document.querySelector("#fringe-cleanup");
+const fringeCleanupValue = document.querySelector("#fringe-cleanup-value");
 const bgModel = document.querySelector("#bg-model");
 const bgTolerance = document.querySelector("#bg-tolerance");
 const bgToleranceValue = document.querySelector("#bg-tolerance-value");
+const innerCleanup = document.querySelector("#inner-cleanup");
+const innerCleanupValue = document.querySelector("#inner-cleanup-value");
 const backgroundDevice = document.querySelector("#background-device");
 const resultActions = document.querySelector("#result-actions");
 const resultDownload = document.querySelector("#result-download");
@@ -90,6 +96,24 @@ const toleranceDefaults = {
   strong: "48",
 };
 
+const trimDefaults = {
+  preserve: "1",
+  balanced: "2",
+  strong: "3",
+};
+
+const fringeDefaults = {
+  preserve: "30",
+  balanced: "45",
+  strong: "70",
+};
+
+const innerCleanupDefaults = {
+  preserve: "0",
+  balanced: "25",
+  strong: "50",
+};
+
 const presets = {
   smart: {
     note: "Smart Auto keeps model detection enabled and chooses safer defaults.",
@@ -100,6 +124,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.55",
+    edgeTrim: "1",
+    fringeCleanup: "45",
+    innerCleanup: "25",
     alphaMatting: true,
     postProcess: true,
     preserveInterior: true,
@@ -115,6 +142,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.3",
+    edgeTrim: "2",
+    fringeCleanup: "70",
+    innerCleanup: "45",
     alphaMatting: false,
     postProcess: true,
     preserveInterior: true,
@@ -130,6 +160,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.45",
+    edgeTrim: "0",
+    fringeCleanup: "0",
+    innerCleanup: "0",
     alphaMatting: true,
     postProcess: true,
     preserveInterior: true,
@@ -145,6 +178,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.35",
+    edgeTrim: "1",
+    fringeCleanup: "35",
+    innerCleanup: "20",
     alphaMatting: false,
     postProcess: true,
     preserveInterior: true,
@@ -160,6 +196,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.5",
+    edgeTrim: "1",
+    fringeCleanup: "40",
+    innerCleanup: "25",
     alphaMatting: true,
     postProcess: true,
     preserveInterior: true,
@@ -175,6 +214,9 @@ const presets = {
     scale: "8",
     sizing: "scale",
     denoise: "0.55",
+    edgeTrim: "0",
+    fringeCleanup: "0",
+    innerCleanup: "0",
     alphaMatting: true,
     postProcess: true,
     preserveInterior: true,
@@ -190,6 +232,9 @@ const presets = {
     scale: "4",
     sizing: "scale",
     denoise: "0.25",
+    edgeTrim: "2",
+    fringeCleanup: "70",
+    innerCleanup: "45",
     alphaMatting: false,
     postProcess: false,
     preserveInterior: true,
@@ -312,16 +357,22 @@ function applyPreset(key, fromUser = false) {
   setRadioValue("scale", preset.scale);
   setRadioValue("sizing", preset.sizing);
   setRadioValue("cut_mode", preset.cut);
+  applyCutPreset(false);
   document.querySelector("#mode").value = preset.mode;
   bgModel.value = preset.model;
   denoise.value = preset.denoise;
+  edgeTrim.value = preset.edgeTrim;
+  fringeCleanup.value = preset.fringeCleanup;
+  innerCleanup.value = preset.innerCleanup;
   outputFormat.value = preset.format;
   setCheckbox("alpha-matting", preset.alphaMatting);
   setCheckbox("post-process-mask", preset.postProcess);
   setCheckbox("preserve-interior", preset.preserveInterior);
   setCheckbox("respect-alpha", preset.respectAlpha);
   updateDenoiseValue();
-  applyCutPreset(false);
+  updateEdgeTrimValue();
+  updateFringeCleanupValue();
+  updateInnerCleanupValue();
   syncToolUi();
   syncSizingUi(key === "print");
   presetNote.textContent = preset.note;
@@ -350,15 +401,21 @@ function applySmartPresetForFile(file, size) {
     document.querySelector("#mode").value = "auto";
     bgModel.value = "auto";
     setRadioValue("cut_mode", "balanced");
+    applyCutPreset(false);
     setRadioValue("scale", isLarge ? "2" : "4");
     setRadioValue("sizing", "scale");
     denoise.value = "0.45";
+    edgeTrim.value = "2";
+    fringeCleanup.value = "65";
+    innerCleanup.value = "45";
     setCheckbox("alpha-matting", false);
     setCheckbox("post-process-mask", true);
     setCheckbox("preserve-interior", true);
     setCheckbox("respect-alpha", true);
     updateDenoiseValue();
-    applyCutPreset(false);
+    updateEdgeTrimValue();
+    updateFringeCleanupValue();
+    updateInnerCleanupValue();
     syncToolUi();
     syncSizingUi(false);
     presetNote.textContent = "Smart Auto detected a graphic-style image and kept safer cutout/upscale defaults.";
@@ -369,7 +426,13 @@ function applySmartPresetForFile(file, size) {
   setRadioValue("scale", isLarge ? "2" : "4");
   setRadioValue("sizing", "scale");
   denoise.value = "0.55";
+  edgeTrim.value = "0";
+  fringeCleanup.value = "0";
+  innerCleanup.value = "0";
   updateDenoiseValue();
+  updateEdgeTrimValue();
+  updateFringeCleanupValue();
+  updateInnerCleanupValue();
   syncToolUi();
   syncSizingUi(false);
   presetNote.textContent = "Smart Auto detected a photo-style image and left upscale type on Auto.";
@@ -696,15 +759,33 @@ function updateEdgeRefineValue() {
   edgeRefineValue.textContent = edgeRefine.value;
 }
 
+function updateEdgeTrimValue() {
+  edgeTrimValue.textContent = edgeTrim.value;
+}
+
+function updateFringeCleanupValue() {
+  fringeCleanupValue.textContent = fringeCleanup.value;
+}
+
 function updateBgToleranceValue() {
   bgToleranceValue.textContent = bgTolerance.value;
+}
+
+function updateInnerCleanupValue() {
+  innerCleanupValue.textContent = innerCleanup.value;
 }
 
 function applyCutPreset(notify = true) {
   edgeRefine.value = edgeDefaults[selectedCutMode()] || edgeDefaults.balanced;
   bgTolerance.value = toleranceDefaults[selectedCutMode()] || toleranceDefaults.balanced;
+  edgeTrim.value = trimDefaults[selectedCutMode()] || trimDefaults.balanced;
+  fringeCleanup.value = fringeDefaults[selectedCutMode()] || fringeDefaults.balanced;
+  innerCleanup.value = innerCleanupDefaults[selectedCutMode()] || innerCleanupDefaults.balanced;
   updateEdgeRefineValue();
   updateBgToleranceValue();
+  updateEdgeTrimValue();
+  updateFringeCleanupValue();
+  updateInnerCleanupValue();
   if (selectedFile && notify) {
     clearResultOnly();
     setStatus("Ready", "ready", "Cut strength updated. Start when ready.");
@@ -966,7 +1047,10 @@ document.addEventListener("keydown", (event) => {
 
 denoise.addEventListener("input", updateDenoiseValue);
 edgeRefine.addEventListener("input", updateEdgeRefineValue);
+edgeTrim.addEventListener("input", updateEdgeTrimValue);
+fringeCleanup.addEventListener("input", updateFringeCleanupValue);
 bgTolerance.addEventListener("input", updateBgToleranceValue);
+innerCleanup.addEventListener("input", updateInnerCleanupValue);
 bgModel.addEventListener("change", () => {
   if (selectedFile) {
     clearResultOnly();
@@ -1049,7 +1133,10 @@ function buildPayload(file, size = selectedImageSize) {
   payload.set("cut_mode", selectedCutMode());
   payload.set("alpha_matting", document.querySelector("#alpha-matting").checked ? "true" : "false");
   payload.set("edge_refine", edgeRefine.value);
+  payload.set("edge_trim", edgeTrim.value);
+  payload.set("fringe_cleanup", fringeCleanup.value);
   payload.set("background_tolerance", bgTolerance.value);
+  payload.set("inner_cleanup", innerCleanup.value);
   payload.set("post_process_mask", document.querySelector("#post-process-mask").checked ? "true" : "false");
   payload.set("preserve_interior", document.querySelector("#preserve-interior").checked ? "true" : "false");
   payload.set("respect_existing_alpha", document.querySelector("#respect-alpha").checked ? "true" : "false");
@@ -1207,7 +1294,10 @@ form.addEventListener("submit", async (event) => {
 
 updateDenoiseValue();
 updateEdgeRefineValue();
+updateEdgeTrimValue();
+updateFringeCleanupValue();
 updateBgToleranceValue();
+updateInnerCleanupValue();
 setComparePosition(compareSlider.value);
 setPreviewBackground("checker");
 syncSizingUi();

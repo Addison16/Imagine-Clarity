@@ -263,6 +263,30 @@
                 <label class="field">
                   <span class="label-row">
                     <span class="help-label">
+                      Edge trim
+                      <button class="info-tip" type="button" aria-label="Show help for edge trim" aria-expanded="false" aria-controls="edge-trim-help">i</button>
+                      <span id="edge-trim-help" class="info-panel" role="tooltip" hidden>Trims a few pixels from the transparent outline to remove thin white halos. Use 1 or 2 for stickers and logos; use 0 for soft photo edges.</span>
+                    </span>
+                    <output id="edge-trim-value" for="edge-trim">1</output>
+                  </span>
+                  <input id="edge-trim" name="edge_trim" type="range" min="0" max="8" step="1" value="1" />
+                </label>
+
+                <label class="field">
+                  <span class="label-row">
+                    <span class="help-label">
+                      Fringe cleanup
+                      <button class="info-tip" type="button" aria-label="Show help for fringe cleanup" aria-expanded="false" aria-controls="fringe-cleanup-help">i</button>
+                      <span id="fringe-cleanup-help" class="info-panel" role="tooltip" hidden>Targets leftover background-colored pixels close to the cut edge. Raise it when you see a white or colored rim; lower it if fine outline detail disappears.</span>
+                    </span>
+                    <output id="fringe-cleanup-value" for="fringe-cleanup">45</output>
+                  </span>
+                  <input id="fringe-cleanup" name="fringe_cleanup" type="range" min="0" max="100" step="1" value="45" />
+                </label>
+
+                <label class="field">
+                  <span class="label-row">
+                    <span class="help-label">
                       Background similarity
                       <button class="info-tip" type="button" aria-label="Show help for background similarity" aria-expanded="false" aria-controls="bg-tolerance-help">i</button>
                       <span id="bg-tolerance-help" class="info-panel" role="tooltip" hidden>Used most in logo and graphic mode. Higher values remove more colors that match the outer background; lower values protect artwork and lettering.</span>
@@ -270,6 +294,18 @@
                     <output id="bg-tolerance-value" for="bg-tolerance">34</output>
                   </span>
                   <input id="bg-tolerance" name="background_tolerance" type="range" min="4" max="96" step="1" value="34" />
+                </label>
+
+                <label class="field">
+                  <span class="label-row">
+                    <span class="help-label">
+                      Inner pocket cleanup
+                      <button class="info-tip" type="button" aria-label="Show help for inner pocket cleanup" aria-expanded="false" aria-controls="inner-cleanup-help">i</button>
+                      <span id="inner-cleanup-help" class="info-panel" role="tooltip" hidden>Removes trapped background-colored areas connected to transparent space, such as gaps under arms, inside rolls, or around printer frames. If the background is fully enclosed, turn off Protect inside detail carefully.</span>
+                    </span>
+                    <output id="inner-cleanup-value" for="inner-cleanup">25</output>
+                  </span>
+                  <input id="inner-cleanup" name="inner_cleanup" type="range" min="0" max="100" step="1" value="25" />
                 </label>
 
                 <label class="switch-row">

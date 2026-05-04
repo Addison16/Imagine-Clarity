@@ -42,6 +42,9 @@ class BackgroundOptions:
     cut_mode: str = "balanced"
     alpha_matting: bool = True
     edge_refine: int = 8
+    edge_trim: int = 0
+    fringe_cleanup: int = 0
+    inner_cleanup: int = 0
     background_tolerance: int = 34
     device: str = "auto"
     post_process_mask: bool = True
@@ -65,28 +68,38 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
     source_img = Image.open(io.BytesIO(raw)).convert("RGBA")
 
     if options.respect_existing_alpha and _has_existing_cutout(source_img):
-        encoded, extension, media_type = _encode(source_img, options.output_format)
-        return BackgroundResult(
-            data=encoded,
-            width=source_img.width,
-            height=source_img.height,
-            extension=extension,
-            media_type=media_type,
-            engine="existing-alpha (passthrough)",
-        )
-
-    if options.model == "logo" or (
-        options.model == "auto" and _should_use_edge_color_cut(source_img, options.background_tolerance)
-    ):
-        img = _edge_color_cutout(source_img, options)
+        refinements = _active_refinements(options)
+        img = _apply_alpha_refinements(source_img, options) if refinements else source_img
         encoded, extension, media_type = _encode(img, options.output_format)
+        engine = "existing-alpha (passthrough)"
+        if refinements:
+            engine = f"existing-alpha refined ({', '.join(refinements)})"
         return BackgroundResult(
             data=encoded,
             width=img.width,
             height=img.height,
             extension=extension,
             media_type=media_type,
-            engine="edge-color safe cut (CPU)",
+            engine=engine,
+        )
+
+    if options.model == "logo" or (
+        options.model == "auto" and _should_use_edge_color_cut(source_img, options.background_tolerance)
+    ):
+        img = _edge_color_cutout(source_img, options)
+        img = _apply_alpha_refinements(img, options)
+        encoded, extension, media_type = _encode(img, options.output_format)
+        engine = "edge-color safe cut (CPU)"
+        refinements = _active_refinements(options)
+        if refinements:
+            engine = f"{engine} + {', '.join(refinements)}"
+        return BackgroundResult(
+            data=encoded,
+            width=img.width,
+            height=img.height,
+            extension=extension,
+            media_type=media_type,
+            engine=engine,
         )
 
     try:
@@ -122,15 +135,20 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
     img = Image.open(io.BytesIO(result)).convert("RGBA")
     if options.preserve_interior:
         img = _preserve_interior_alpha(img, source_img)
+    img = _apply_alpha_refinements(img, options)
     encoded, extension, media_type = _encode(img, options.output_format)
     active_providers = getattr(getattr(session, "inner_session", None), "get_providers", lambda: providers)()
+    engine = f"{model_name} ({active_providers[0]})"
+    refinements = _active_refinements(options)
+    if refinements:
+        engine = f"{engine} + {', '.join(refinements)}"
     return BackgroundResult(
         data=encoded,
         width=img.width,
         height=img.height,
         extension=extension,
         media_type=media_type,
-        engine=f"{model_name} ({active_providers[0]})",
+        engine=engine,
     )
 
 
@@ -146,6 +164,9 @@ def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
         raise ValueError(f"Background cut mode must be one of: {allowed}.")
 
     edge_refine = max(0, min(20, int(options.edge_refine)))
+    edge_trim = max(0, min(8, int(options.edge_trim)))
+    fringe_cleanup = max(0, min(100, int(options.fringe_cleanup)))
+    inner_cleanup = max(0, min(100, int(options.inner_cleanup)))
     background_tolerance = max(4, min(96, int(options.background_tolerance)))
 
     output_format = options.output_format.lower().strip()
@@ -157,6 +178,9 @@ def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
         cut_mode=cut_mode,
         alpha_matting=bool(options.alpha_matting),
         edge_refine=edge_refine,
+        edge_trim=edge_trim,
+        fringe_cleanup=fringe_cleanup,
+        inner_cleanup=inner_cleanup,
         background_tolerance=background_tolerance,
         device=_normalize_device(options.device),
         post_process_mask=bool(options.post_process_mask),
@@ -291,6 +315,96 @@ def _clean_alpha(alpha: "Any", edge_refine: int, cv2: "Any") -> "Any":
     refined[edge_band] = soft[edge_band]
     refined[refined < 2] = 0
     refined[refined > 253] = 255
+    return refined
+
+
+def _active_refinements(options: BackgroundOptions) -> list[str]:
+    refinements: list[str] = []
+    if options.edge_trim:
+        refinements.append(f"edge trim {options.edge_trim}px")
+    if options.fringe_cleanup:
+        refinements.append(f"fringe cleanup {options.fringe_cleanup}")
+    if options.inner_cleanup:
+        refinements.append(f"inner cleanup {options.inner_cleanup}")
+    return refinements
+
+
+def _apply_alpha_refinements(img: Image.Image, options: BackgroundOptions) -> Image.Image:
+    if not _active_refinements(options):
+        return img
+
+    import cv2
+    import numpy as np
+
+    arr = np.array(img.convert("RGBA"))
+    alpha = arr[:, :, 3].astype("float32")
+
+    if options.fringe_cleanup or options.inner_cleanup:
+        matte_color = _estimate_matte_color(arr, alpha, np)
+        if matte_color is not None:
+            alpha = _remove_matte_artifacts(arr, alpha, matte_color, options, cv2, np)
+
+    if options.edge_trim:
+        kernel_size = options.edge_trim * 2 + 1
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+        alpha = cv2.erode(alpha.astype("uint8"), kernel, iterations=1).astype("float32")
+
+    alpha[alpha < 2] = 0
+    alpha[alpha > 253] = 255
+    refined = arr.copy()
+    refined[:, :, 3] = alpha.clip(0, 255).astype("uint8")
+    return Image.fromarray(refined, mode="RGBA")
+
+
+def _estimate_matte_color(arr: "Any", alpha: "Any", np: "Any") -> "Any | None":
+    semi_transparent = (alpha > 8) & (alpha < 248)
+    if int(semi_transparent.sum()) < 64:
+        return None
+    samples = arr[:, :, :3][semi_transparent].astype("float32")
+    return np.median(samples, axis=0).astype("float32")
+
+
+def _remove_matte_artifacts(
+    arr: "Any",
+    alpha: "Any",
+    matte_color: "Any",
+    options: BackgroundOptions,
+    cv2: "Any",
+    np: "Any",
+) -> "Any":
+    rgb = arr[:, :, :3].astype("float32")
+    color_distance = np.sqrt(np.sum((rgb - matte_color) ** 2, axis=2))
+    strength = max(options.fringe_cleanup, options.inner_cleanup, options.background_tolerance)
+    tolerance = 18.0 + strength * 0.95
+    candidate = (alpha > 8) & (color_distance <= tolerance)
+    if not candidate.any():
+        return alpha
+
+    refined = alpha.copy()
+    foreground = (refined > 8).astype("uint8")
+    distance_to_transparency = cv2.distanceTransform(foreground, cv2.DIST_L2, 3)
+
+    if options.fringe_cleanup:
+        radius = 3.0 + options.edge_trim + options.fringe_cleanup / 8.0 + options.edge_refine / 10.0
+        near_edge = candidate & (distance_to_transparency <= radius)
+        if near_edge.any():
+            fade = (distance_to_transparency / max(radius, 1.0) * 255).clip(0, 255)
+            refined[near_edge] = np.minimum(refined[near_edge], fade[near_edge])
+
+    if options.inner_cleanup:
+        remaining_candidate = candidate & (refined > 8)
+        if remaining_candidate.any():
+            if options.preserve_interior:
+                walkable = (remaining_candidate | (refined <= 8)).astype("uint8")
+                count, labels, _stats, _centroids = cv2.connectedComponentsWithStats(walkable, 8)
+                seed_labels = np.unique(labels[refined <= 8])
+                connected_to_transparency = np.zeros(count, dtype=bool)
+                connected_to_transparency[seed_labels] = True
+                cleanup = connected_to_transparency[labels] & remaining_candidate
+            else:
+                cleanup = remaining_candidate
+            refined[cleanup] = 0
+
     return refined
 
 

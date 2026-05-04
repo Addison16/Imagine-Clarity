@@ -262,9 +262,42 @@ def _conservative_resize(img: Image.Image, scale: float) -> Image.Image:
 
 
 def _resize_to_target(img: Image.Image, target: tuple[int, int]) -> Image.Image:
-    resized = img.resize(target, Image.Resampling.LANCZOS)
+    if img.mode == "RGBA" and img.getchannel("A").getextrema()[0] < 255:
+        resized = _resize_rgba_alpha_safe(img, target, Image.Resampling.LANCZOS)
+    else:
+        resized = img.resize(target, Image.Resampling.LANCZOS)
     # A mild radius keeps text and line art cleaner without inventing new texture.
-    return resized.filter(ImageFilter.UnsharpMask(radius=1.2, percent=70, threshold=4))
+    return _unsharp_preserving_alpha(resized)
+
+
+def _resize_rgba_alpha_safe(img: Image.Image, target: tuple[int, int], resample: int) -> Image.Image:
+    rgba = img.convert("RGBA")
+    arr = np.asarray(rgba).astype("float32")
+    alpha = arr[:, :, 3]
+    alpha_norm = alpha[:, :, None] / 255.0
+    premultiplied = arr[:, :, :3] * alpha_norm
+
+    premul_img = Image.fromarray(premultiplied.clip(0, 255).astype("uint8"), mode="RGB")
+    alpha_img = Image.fromarray(alpha.clip(0, 255).astype("uint8"), mode="L")
+    resized_premul = np.asarray(premul_img.resize(target, resample)).astype("float32")
+    resized_alpha = np.asarray(alpha_img.resize(target, resample)).astype("float32")
+
+    divisor = np.maximum(resized_alpha[:, :, None] / 255.0, 1 / 255.0)
+    rgb = resized_premul / divisor
+    rgb[resized_alpha <= 1] = 0
+
+    out = np.dstack((rgb.clip(0, 255), resized_alpha.clip(0, 255))).astype("uint8")
+    return Image.fromarray(out, mode="RGBA")
+
+
+def _unsharp_preserving_alpha(img: Image.Image) -> Image.Image:
+    if img.mode != "RGBA":
+        return img.filter(ImageFilter.UnsharpMask(radius=1.2, percent=70, threshold=4))
+
+    alpha = img.getchannel("A")
+    sharpened = img.convert("RGB").filter(ImageFilter.UnsharpMask(radius=1.2, percent=70, threshold=4))
+    sharpened.putalpha(alpha)
+    return sharpened
 
 
 def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Image, str]:

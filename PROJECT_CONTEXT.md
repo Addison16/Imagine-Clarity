@@ -14,7 +14,9 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - Image upscaling with 2x, 4x, and 8x scale options.
 - Target resolution upscaling with a maximum output limit of `16,384 x 16,384`.
 - Auto upscale mode that chooses a conservative path for text, logos, alpha images, and target-size jobs.
+- Alpha-aware transparent PNG resizing to reduce bright halos during conservative upscaling.
 - Background removal with multiple model/cut options and detail-preserving cleanup for logos and graphics.
+- Background refinement controls for edge trim, fringe cleanup, and inner background pocket cleanup.
 - All-in-One mode: background removal followed by upscale to a selected scale or target resolution.
 - Batch processing from the UI by selecting multiple image files.
 - Saved Jobs panel backed by persisted Docker storage.
@@ -39,7 +41,7 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - `docker-compose.prebuilt.gpu.yml`: pull-and-run GPU prebuilt image setup.
 - `app/main.py`: FastAPI routes, validation, health endpoint, and API responses.
 - `app/jobs.py`: saved output files and JSON job history.
-- `app/upscaler.py`: upscale logic, hardware selection, target sizing, and background removal.
+- `app/upscaler.py`: upscale logic, hardware selection, target sizing, and alpha-aware transparent resizing.
 - `app/static/index.html`: web UI markup.
 - `app/static/app.js`: web UI behavior and form/API wiring.
 - `app/static/styles.css`: web UI styling.
@@ -103,10 +105,11 @@ node --check app\static\app.js
 - Updated smoke tests to cover the All-in-One pipeline.
 - Added saved jobs, persisted output downloads, runtime diagnostics, presets, batch UI processing, and preview background controls.
 - Added Saved Jobs delete/clear controls backed by `DELETE /api/jobs/{job_id}` and `DELETE /api/jobs`.
+- Added alpha-aware transparent resize plus edge trim, fringe cleanup, and inner cleanup controls for cleaner transparent cutouts.
 
 ## Known Limits And Next Improvements
 
 - The app saves processed outputs and job metadata, but it still does not save original uploaded files by default.
-- Background removal can still need tuning for unusual artwork, transparent edges, or busy images.
+- Background removal can still need tuning for unusual artwork, fully enclosed background pockets, transparent edges, or busy images.
 - AMD and Intel GPU acceleration are not currently implemented; CPU fallback is expected.
 - A future improvement could add a real progress stream for long-running upscale/background jobs.
