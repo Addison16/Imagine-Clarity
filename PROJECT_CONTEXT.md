@@ -19,6 +19,7 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - Background refinement controls for edge trim, fringe cleanup, and inner background pocket cleanup.
 - All-in-One mode: background removal followed by upscale to a selected scale or target resolution.
 - Batch processing from the UI by selecting multiple image files.
+- Automation API via `/api/process` with image or JSON response modes and `/api/capabilities` for settings discovery.
 - Saved Jobs panel backed by persisted Docker storage.
 - Saved Jobs supports deleting individual results and clearing recent jobs after a UI confirmation prompt.
 - Runtime Diagnostics panel backed by `/api/diagnostics`.
@@ -106,6 +107,7 @@ node --check app\static\app.js
 - Added saved jobs, persisted output downloads, runtime diagnostics, presets, batch UI processing, and preview background controls.
 - Added Saved Jobs delete/clear controls backed by `DELETE /api/jobs/{job_id}` and `DELETE /api/jobs`.
 - Added alpha-aware transparent resize plus edge trim, fringe cleanup, and inner cleanup controls for cleaner transparent cutouts.
+- Added unified automation API endpoint `/api/process` and capability discovery at `/api/capabilities`.
 
 ## Known Limits And Next Improvements
 

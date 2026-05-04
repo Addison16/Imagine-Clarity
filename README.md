@@ -180,6 +180,62 @@ References:
 
 ## API
 
+Interactive OpenAPI docs are available at:
+
+- `http://localhost:8794/docs`
+- `http://localhost:8794/redoc`
+
+Capabilities and valid settings:
+
+```powershell
+curl.exe http://localhost:8794/api/capabilities
+```
+
+Unified automation endpoint:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/process `
+  -F "image=@input.png" `
+  -F "tool=remove-background-upscale" `
+  -F "response_mode=image" `
+  -F "model=logo" `
+  -F "cut_mode=balanced" `
+  -F "edge_trim=2" `
+  -F "fringe_cleanup=70" `
+  -F "inner_cleanup=45" `
+  -F "scale=4" `
+  -F "mode=auto" `
+  -F "device=auto" `
+  -F "output_format=png" `
+  --output result.png
+```
+
+Use `response_mode=json` when another program wants metadata plus a download URL instead of raw image bytes:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/process `
+  -F "image=@input.png" `
+  -F "tool=remove-background" `
+  -F "response_mode=json" `
+  -F "model=auto" `
+  -F "cut_mode=balanced" `
+  -F "output_format=png"
+```
+
+The JSON response includes `job_id`, `download_url`, `relative_download_url`, and the saved job metadata. Download later with:
+
+```powershell
+curl.exe -L http://localhost:8794/api/results/JOB_ID --output result.png
+```
+
+Valid `tool` values for `/api/process`:
+
+- `upscale`
+- `remove-background`
+- `remove-background-upscale`
+
+The older direct endpoints below are still supported.
+
 Upscale:
 
 ```powershell
