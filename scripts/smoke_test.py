@@ -152,6 +152,41 @@ def main() -> int:
     logo.save(buffer, format="PNG")
     buffer.seek(0)
     response = requests.post(
+        f"{base_url}/api/process",
+        files={"image": ("api-logo.png", buffer, "image/png")},
+        data={
+            "tool": "remove-background",
+            "response_mode": "json",
+            "model": "logo",
+            "cut_mode": "balanced",
+            "alpha_matting": "false",
+            "edge_refine": "8",
+            "edge_trim": "1",
+            "fringe_cleanup": "20",
+            "inner_cleanup": "10",
+            "background_tolerance": "34",
+            "device": "cpu",
+            "post_process_mask": "true",
+            "preserve_interior": "true",
+            "respect_existing_alpha": "true",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    api_result = response.json()
+    assert api_result["ok"] is True, api_result
+    assert api_result["download_url"].startswith(base_url), api_result
+    assert api_result["relative_download_url"].startswith("/api/results/"), api_result
+    saved = requests.get(api_result["download_url"], timeout=10)
+    saved.raise_for_status()
+    out = Image.open(io.BytesIO(saved.content)).convert("RGBA")
+    assert out.size == (90, 70), out.size
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
         f"{base_url}/api/remove-background-upscale",
         files={"image": ("combo-logo.png", buffer, "image/png")},
         data={

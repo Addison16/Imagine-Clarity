@@ -51,7 +51,7 @@ logger.setLevel(logging.INFO)
 app = FastAPI(
     title="Clarity Image Tools",
     description="Docker-hosted AI image upscaling and background removal.",
-    version="1.2.0",
+    version="1.3.0",
 )
 
 app.add_middleware(
@@ -80,6 +80,7 @@ def health() -> dict[str, object]:
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": list(SUPPORTED_TOOLS),
+        "tools": TOOLS,
         "history_limit": HISTORY_LIMIT,
         "cors_allow_origins": CORS_ORIGINS or ["*"],
         "runtime": _runtime_info(),
@@ -620,6 +621,61 @@ def _resolve_upscale_output_size(width: int, height: int, options: UpscaleOption
 def _safe_stem(filename: str | None) -> str:
     stem = Path(filename or "image").stem
     return re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip("-") or "image"
+
+
+def _normalize_tool(tool: str) -> str:
+    normalized = (tool or "upscale").lower().strip().replace("_", "-")
+    aliases = {
+        "background": "remove-background",
+        "background-removal": "remove-background",
+        "remove-bg": "remove-background",
+        "remove-back-ground": "remove-background",
+        "all-in-one": "remove-background-upscale",
+        "background-upscale": "remove-background-upscale",
+        "remove-bg-upscale": "remove-background-upscale",
+        "remove-background-and-upscale": "remove-background-upscale",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in TOOLS:
+        raise HTTPException(status_code=400, detail=f"Tool must be one of: {', '.join(TOOLS)}.")
+    return normalized
+
+
+def _normalize_response_mode(response_mode: str) -> str:
+    normalized = (response_mode or "image").lower().strip()
+    if normalized in {"file", "binary", "bytes"}:
+        normalized = "image"
+    if normalized not in RESPONSE_MODES:
+        raise HTTPException(status_code=400, detail="response_mode must be image or json.")
+    return normalized
+
+
+def _automation_response(
+    request: Request,
+    response_mode: str,
+    data: bytes,
+    media_type: str,
+    filename: str,
+    job: dict[str, object],
+    headers: dict[str, str],
+) -> StreamingResponse | JSONResponse:
+    if response_mode == "json":
+        json_headers = {key: value for key, value in headers.items() if key.lower() != "content-disposition"}
+        json_headers["X-API-Response"] = "json"
+        payload = {
+            "ok": True,
+            "job_id": job["id"],
+            "filename": filename,
+            "media_type": media_type,
+            "download_url": str(request.url_for("api_result", job_id=job["id"])),
+            "relative_download_url": job["download_url"],
+            "job": job,
+        }
+        return JSONResponse(payload, headers=json_headers)
+
+    image_headers = dict(headers)
+    image_headers["X-API-Response"] = "image"
+    return StreamingResponse(io.BytesIO(data), media_type=media_type, headers=image_headers)
 
 
 @lru_cache(maxsize=1)
