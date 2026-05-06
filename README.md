@@ -261,6 +261,30 @@ Runtime diagnostics:
 curl.exe http://localhost:8794/api/diagnostics
 ```
 
+Automation capability discovery:
+
+```powershell
+curl.exe http://localhost:8794/api/capabilities
+```
+
+Unified automation endpoint (`response_mode=image` returns bytes directly, `response_mode=json` returns metadata and download URL):
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/process `
+  -F "image=@input.png" `
+  -F "tool=remove-background-upscale" `
+  -F "response_mode=json" `
+  -F "model=logo" `
+  -F "cut_mode=balanced" `
+  -F "edge_trim=2" `
+  -F "fringe_cleanup=70" `
+  -F "inner_cleanup=45" `
+  -F "scale=4" `
+  -F "mode=auto" `
+  -F "device=auto" `
+  -F "output_format=png"
+```
+
 ## Settings
 
 - `HOST_PORT`: host port, default `8794`.
@@ -272,6 +296,9 @@ curl.exe http://localhost:8794/api/diagnostics
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
 - `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
 - `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
+- `JOB_TTL_HOURS`: optional auto-cleanup window for saved jobs/results. `0` disables TTL cleanup (default).
+- `CLARITY_API_KEY`: optional API key for `/api/process`. If set, callers must send `X-API-Key: <value>` or `Authorization: Bearer <value>`.
+- `CORS_ALLOW_ORIGINS`: comma-separated CORS allowlist. Default is `*` for local/dev convenience.
 
 Per-job processing source:
 

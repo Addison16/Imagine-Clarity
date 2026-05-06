@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hmac
 import logging
 import os
 import re
@@ -8,7 +9,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,8 @@ from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
 from app.background import (
+    BACKGROUND_CUT_MODES,
+    BACKGROUND_MODELS,
     SUPPORTED_BG_FORMATS,
     BackgroundOptions,
     remove_background,
@@ -38,6 +41,10 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
 MAX_UPSCALE_FACTOR = 8.0
+API_KEY = os.getenv("CLARITY_API_KEY", "").strip()
+CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
+SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale")
+SUPPORTED_RESPONSE_MODES = ("image", "json")
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
 
@@ -49,7 +56,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS or ["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
@@ -72,8 +79,9 @@ def health() -> dict[str, object]:
         "max_upscale_factor": MAX_UPSCALE_FACTOR,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
-        "tools": ["upscale", "remove-background", "remove-background-upscale"],
+        "tools": list(SUPPORTED_TOOLS),
         "history_limit": HISTORY_LIMIT,
+        "cors_allow_origins": CORS_ORIGINS or ["*"],
         "runtime": _runtime_info(),
     }
 
@@ -119,6 +127,134 @@ def api_diagnostics() -> dict[str, object]:
         },
         "recommendations": _runtime_recommendations(runtime),
     }
+
+
+@app.get("/api/capabilities")
+def api_capabilities() -> dict[str, object]:
+    return {
+        "tools": list(SUPPORTED_TOOLS),
+        "response_modes": list(SUPPORTED_RESPONSE_MODES),
+        "output_formats": sorted(set(SUPPORTED_FORMATS) | set(SUPPORTED_BG_FORMATS)),
+        "upscale": {
+            "modes": ["auto", "photo", "general", "anime", "conservative"],
+            "max_upscale_factor": MAX_UPSCALE_FACTOR,
+            "max_dimension": MAX_IMAGE_DIMENSION,
+        },
+        "background": {
+            "models": sorted(BACKGROUND_MODELS.keys()),
+            "cut_modes": sorted(BACKGROUND_CUT_MODES.keys()),
+            "output_formats": sorted(SUPPORTED_BG_FORMATS),
+        },
+        "security": {"api_key_enabled": bool(API_KEY)},
+    }
+
+
+def _require_api_key(x_api_key: str | None, authorization: str | None = None) -> None:
+    if not API_KEY:
+        return
+    bearer_key = None
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            bearer_key = token.strip()
+    provided = (x_api_key or "").strip() or bearer_key or ""
+    if not hmac.compare_digest(provided, API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+
+
+def _filename_from_disposition(disposition: str | None) -> str | None:
+    if not disposition:
+        return None
+    match = re.search(r'filename="([^"]+)"', disposition)
+    return match.group(1) if match else None
+
+
+def _process_json_payload(request: Request, response: StreamingResponse, tool: str) -> dict[str, object]:
+    headers = response.headers
+    relative_download_url = headers.get("X-Download-URL")
+    absolute_download_url = None
+    if relative_download_url:
+        absolute_download_url = str(request.base_url).rstrip("/") + relative_download_url
+    return {
+        "job_id": headers.get("X-Job-Id"),
+        "filename": _filename_from_disposition(headers.get("content-disposition")),
+        "download_url": absolute_download_url,
+        "relative_download_url": relative_download_url,
+        "metadata": {
+            "tool": tool,
+            "output_width": headers.get("X-Output-Width"),
+            "output_height": headers.get("X-Output-Height"),
+            "engine": headers.get("X-Upscaler-Engine")
+            or headers.get("X-Background-Engine")
+            or headers.get("X-Pipeline-Engine"),
+        },
+    }
+
+
+@app.post("/api/process")
+async def api_process(
+    request: Request,
+    image: UploadFile = File(...),
+    tool: str = Form("upscale"),
+    response_mode: str = Form("image"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+    scale: float = Form(4.0),
+    mode: str = Form("auto"),
+    face_enhance: bool = Form(False),
+    denoise: float = Form(0.55),
+    tile: int = Form(512),
+    device: str = Form("auto"),
+    output_format: str = Form("png"),
+    target_width: int | None = Form(None),
+    target_height: int | None = Form(None),
+    model: str = Form("auto"),
+    cut_mode: str = Form("balanced"),
+    alpha_matting: bool = Form(True),
+    edge_refine: int = Form(8),
+    edge_trim: int = Form(0),
+    fringe_cleanup: int = Form(0),
+    inner_cleanup: int = Form(0),
+    background_tolerance: int = Form(34),
+    post_process_mask: bool = Form(True),
+    preserve_interior: bool = Form(True),
+    respect_existing_alpha: bool = Form(True),
+) -> StreamingResponse | JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    tool = tool.strip().lower()
+    response_mode = response_mode.strip().lower()
+    if response_mode not in SUPPORTED_RESPONSE_MODES:
+        raise HTTPException(status_code=400, detail="response_mode must be image or json.")
+
+    if tool == "upscale":
+        response = await api_upscale(
+            image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
+            device=device, output_format=output_format, target_width=target_width, target_height=target_height
+        )
+    elif tool == "remove-background":
+        response = await api_remove_background(
+            image=image, model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine,
+            edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup,
+            background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask,
+            preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha,
+            output_format=output_format
+        )
+    elif tool == "remove-background-upscale":
+        response = await api_remove_background_upscale(
+            image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
+            upscale_device=device, target_width=target_width, target_height=target_height, model=model,
+            cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim,
+            fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance,
+            background_device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha, output_format=output_format
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported tool. Must be one of: {', '.join(SUPPORTED_TOOLS)}.")
+
+    if response_mode == "image":
+        return response
+
+    return JSONResponse(_process_json_payload(request, response, tool))
 
 
 @app.post("/api/upscale")

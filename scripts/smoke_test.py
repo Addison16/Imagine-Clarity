@@ -15,6 +15,9 @@ def main() -> int:
     diagnostics = requests.get(f"{base_url}/api/diagnostics", timeout=10)
     diagnostics.raise_for_status()
     assert diagnostics.json()["status"] == "ok", diagnostics.text
+    capabilities = requests.get(f"{base_url}/api/capabilities", timeout=10)
+    capabilities.raise_for_status()
+    assert "remove-background-upscale" in capabilities.json()["tools"], capabilities.text
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -179,6 +182,26 @@ def main() -> int:
     assert out.size == (180, 140), out.size
     assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
     assert out.getpixel((90, 70))[3] > 220, out.getpixel((90, 70))
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/process",
+        files={"image": ("process-logo.png", buffer, "image/png")},
+        data={
+            "tool": "remove-background",
+            "response_mode": "json",
+            "model": "logo",
+            "cut_mode": "balanced",
+            "output_format": "png",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    assert payload["job_id"], payload
+    assert payload["download_url"].startswith(base_url), payload
 
     subject = Image.new("RGB", (64, 64), "#e8eef6")
     draw = ImageDraw.Draw(subject)

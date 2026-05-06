@@ -13,6 +13,7 @@ STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/tmp/upscaler"))
 OUTPUT_DIR = STORAGE_DIR / "outputs"
 HISTORY_PATH = STORAGE_DIR / "jobs.json"
 HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "100"))
+JOB_TTL_HOURS = int(os.getenv("JOB_TTL_HOURS", "0"))
 
 _history_lock = Lock()
 
@@ -65,6 +66,7 @@ def save_job_result(
 
 
 def list_jobs(limit: int = 25) -> list[dict[str, Any]]:
+    _purge_expired_jobs()
     jobs = _read_history()
     return jobs[: max(1, min(int(limit), HISTORY_LIMIT))]
 
@@ -109,6 +111,7 @@ def clear_jobs() -> dict[str, Any]:
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
+    _purge_expired_jobs()
     for job in _read_history():
         if job.get("id") == job_id:
             return job
@@ -129,6 +132,7 @@ def result_path(job_id: str) -> Path | None:
 
 
 def storage_summary() -> dict[str, Any]:
+    _purge_expired_jobs()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     jobs = _read_history()
     total_bytes = 0
@@ -138,9 +142,31 @@ def storage_summary() -> dict[str, Any]:
         "output_dir": str(OUTPUT_DIR),
         "history_path": str(HISTORY_PATH),
         "history_limit": HISTORY_LIMIT,
+        "job_ttl_hours": JOB_TTL_HOURS,
         "saved_jobs": len(jobs),
         "saved_bytes": total_bytes,
     }
+
+
+def _purge_expired_jobs() -> None:
+    if JOB_TTL_HOURS <= 0:
+        return
+    cutoff = datetime.now(timezone.utc).timestamp() - (JOB_TTL_HOURS * 3600)
+    with _history_lock:
+        jobs = _read_history_unlocked()
+        kept: list[dict[str, Any]] = []
+        for job in jobs:
+            created_at = str(job.get("created_at", ""))
+            try:
+                created_ts = datetime.fromisoformat(created_at).timestamp()
+            except ValueError:
+                created_ts = 0
+            if created_ts >= cutoff:
+                kept.append(job)
+            else:
+                _delete_stored_file_unlocked(job)
+        if len(kept) != len(jobs):
+            _write_history_unlocked(kept)
 
 
 def _append_history(entry: dict[str, Any]) -> None:
