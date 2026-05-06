@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hmac
 import logging
 import os
 import re
@@ -8,7 +9,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +17,8 @@ from PIL import Image, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
 from app.background import (
+    BACKGROUND_CUT_MODES,
+    BACKGROUND_MODELS,
     SUPPORTED_BG_FORMATS,
     BackgroundOptions,
     remove_background,
@@ -38,8 +41,10 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
 MAX_UPSCALE_FACTOR = 8.0
-TOOLS = ["upscale", "remove-background", "remove-background-upscale"]
-RESPONSE_MODES = {"image", "json"}
+API_KEY = os.getenv("CLARITY_API_KEY", "").strip()
+CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
+SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale")
+SUPPORTED_RESPONSE_MODES = ("image", "json")
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
 
@@ -51,7 +56,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS or ["*"],
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
@@ -74,8 +79,10 @@ def health() -> dict[str, object]:
         "max_upscale_factor": MAX_UPSCALE_FACTOR,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
+        "tools": list(SUPPORTED_TOOLS),
         "tools": TOOLS,
         "history_limit": HISTORY_LIMIT,
+        "cors_allow_origins": CORS_ORIGINS or ["*"],
         "runtime": _runtime_info(),
     }
 
@@ -126,69 +133,61 @@ def api_diagnostics() -> dict[str, object]:
 @app.get("/api/capabilities")
 def api_capabilities() -> dict[str, object]:
     return {
-        "status": "ok",
-        "endpoints": {
-            "process": {
-                "method": "POST",
-                "path": "/api/process",
-                "content_type": "multipart/form-data",
-                "returns": ["image bytes", "json job metadata"],
-            },
-            "download_result": {"method": "GET", "path": "/api/results/{job_id}"},
-            "jobs": {"method": "GET", "path": "/api/jobs"},
-        },
-        "tools": TOOLS,
-        "response_modes": sorted(RESPONSE_MODES),
+        "tools": list(SUPPORTED_TOOLS),
+        "response_modes": list(SUPPORTED_RESPONSE_MODES),
+        "output_formats": sorted(set(SUPPORTED_FORMATS) | set(SUPPORTED_BG_FORMATS)),
         "upscale": {
-            "scales": [2, 3, 4, 8],
             "modes": ["auto", "photo", "general", "anime", "conservative"],
-            "devices": ["auto", "cpu", "cuda"],
-            "formats": sorted(SUPPORTED_FORMATS),
-            "tile_sizes": [0, 128, 256, 384, 512],
             "max_upscale_factor": MAX_UPSCALE_FACTOR,
-            "max_output_side": MAX_IMAGE_DIMENSION,
+            "max_dimension": MAX_IMAGE_DIMENSION,
         },
         "background": {
-            "models": ["auto", "logo", "accurate", "portrait", "anime", "biref-lite", "balanced", "fast"],
-            "cut_modes": ["preserve", "balanced", "strong"],
-            "devices": ["auto", "cpu", "cuda"],
-            "formats": sorted(SUPPORTED_BG_FORMATS),
-            "ranges": {
-                "edge_refine": [0, 20],
-                "edge_trim": [0, 8],
-                "fringe_cleanup": [0, 100],
-                "inner_cleanup": [0, 100],
-                "background_tolerance": [4, 96],
-            },
+            "models": sorted(BACKGROUND_MODELS.keys()),
+            "cut_modes": sorted(BACKGROUND_CUT_MODES.keys()),
+            "output_formats": sorted(SUPPORTED_BG_FORMATS),
         },
-        "presets": {
-            "smart-auto": {
-                "tool": "remove-background-upscale",
-                "mode": "auto",
-                "model": "auto",
-                "cut_mode": "balanced",
-                "scale": 4,
-                "edge_trim": 1,
-                "fringe_cleanup": 45,
-                "inner_cleanup": 25,
-            },
-            "logo-sticker": {
-                "tool": "remove-background-upscale",
-                "mode": "conservative",
-                "model": "logo",
-                "cut_mode": "preserve",
-                "scale": 4,
-                "alpha_matting": False,
-                "edge_trim": 2,
-                "fringe_cleanup": 70,
-                "inner_cleanup": 45,
-            },
-            "photo-upscale": {
-                "tool": "upscale",
-                "mode": "photo",
-                "scale": 4,
-                "denoise": 0.45,
-            },
+        "security": {"api_key_enabled": bool(API_KEY)},
+    }
+
+
+def _require_api_key(x_api_key: str | None, authorization: str | None = None) -> None:
+    if not API_KEY:
+        return
+    bearer_key = None
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() == "bearer" and token:
+            bearer_key = token.strip()
+    provided = (x_api_key or "").strip() or bearer_key or ""
+    if not hmac.compare_digest(provided, API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+
+
+def _filename_from_disposition(disposition: str | None) -> str | None:
+    if not disposition:
+        return None
+    match = re.search(r'filename="([^"]+)"', disposition)
+    return match.group(1) if match else None
+
+
+def _process_json_payload(request: Request, response: StreamingResponse, tool: str) -> dict[str, object]:
+    headers = response.headers
+    relative_download_url = headers.get("X-Download-URL")
+    absolute_download_url = None
+    if relative_download_url:
+        absolute_download_url = str(request.base_url).rstrip("/") + relative_download_url
+    return {
+        "job_id": headers.get("X-Job-Id"),
+        "filename": _filename_from_disposition(headers.get("content-disposition")),
+        "download_url": absolute_download_url,
+        "relative_download_url": relative_download_url,
+        "metadata": {
+            "tool": tool,
+            "output_width": headers.get("X-Output-Width"),
+            "output_height": headers.get("X-Output-Height"),
+            "engine": headers.get("X-Upscaler-Engine")
+            or headers.get("X-Background-Engine")
+            or headers.get("X-Pipeline-Engine"),
         },
     }
 
@@ -199,13 +198,15 @@ async def api_process(
     image: UploadFile = File(...),
     tool: str = Form("upscale"),
     response_mode: str = Form("image"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
     scale: float = Form(4.0),
     mode: str = Form("auto"),
     face_enhance: bool = Form(False),
     denoise: float = Form(0.55),
     tile: int = Form(512),
     device: str = Form("auto"),
-    upscale_device: str | None = Form(None),
+    output_format: str = Form("png"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
     model: str = Form("auto"),
@@ -216,181 +217,45 @@ async def api_process(
     fringe_cleanup: int = Form(0),
     inner_cleanup: int = Form(0),
     background_tolerance: int = Form(34),
-    background_device: str | None = Form(None),
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
-    output_format: str = Form("png"),
-):
-    selected_tool = _normalize_tool(tool)
-    selected_response_mode = _normalize_response_mode(response_mode)
-    raw, metadata = await _read_validated_upload(image)
+) -> StreamingResponse | JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    tool = tool.strip().lower()
+    response_mode = response_mode.strip().lower()
+    if response_mode not in SUPPORTED_RESPONSE_MODES:
+        raise HTTPException(status_code=400, detail="response_mode must be image or json.")
 
-    try:
-        started = time.perf_counter()
-        if selected_tool == "upscale":
-            options = UpscaleOptions(
-                scale=scale,
-                mode=mode,
-                face_enhance=face_enhance,
-                denoise=denoise,
-                tile=tile,
-                device=upscale_device or device,
-                output_format=output_format,
-                target_width=target_width,
-                target_height=target_height,
-            )
-            _validate_upscale_resolution(metadata, options)
-            logger.info("api process upscale start filename=%s options=%s", image.filename, options)
-            result = await run_in_threadpool(upscale_image, raw, options)
-            logger.info(
-                "api process upscale complete filename=%s output=%sx%s engine=%s elapsed=%.1fs",
-                image.filename,
-                result.width,
-                result.height,
-                result.engine,
-                time.perf_counter() - started,
-            )
-            stem = _safe_stem(image.filename)
-            filename = f"{stem}-upscaled-{result.width}x{result.height}.{result.extension}"
-            job = save_job_result(
-                tool=selected_tool,
-                source_filename=image.filename,
-                output_filename=filename,
-                data=result.data,
-                input_metadata=metadata,
-                output_width=result.width,
-                output_height=result.height,
-                output_format=result.extension,
-                engine=result.engine,
-                settings=vars(options),
-            )
-            headers = {
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "X-Upscaler-Engine": result.engine,
-                "X-Output-Width": str(result.width),
-                "X-Output-Height": str(result.height),
-                "X-Job-Id": str(job["id"]),
-                "X-Download-URL": str(job["download_url"]),
-            }
-            return _automation_response(request, selected_response_mode, result.data, result.media_type, filename, job, headers)
+    if tool == "upscale":
+        response = await api_upscale(
+            image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
+            device=device, output_format=output_format, target_width=target_width, target_height=target_height
+        )
+    elif tool == "remove-background":
+        response = await api_remove_background(
+            image=image, model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine,
+            edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup,
+            background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask,
+            preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha,
+            output_format=output_format
+        )
+    elif tool == "remove-background-upscale":
+        response = await api_remove_background_upscale(
+            image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
+            upscale_device=device, target_width=target_width, target_height=target_height, model=model,
+            cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim,
+            fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance,
+            background_device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha, output_format=output_format
+        )
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported tool. Must be one of: {', '.join(SUPPORTED_TOOLS)}.")
 
-        background_options = BackgroundOptions(
-            model=model,
-            cut_mode=cut_mode,
-            alpha_matting=alpha_matting,
-            edge_refine=edge_refine,
-            edge_trim=edge_trim,
-            fringe_cleanup=fringe_cleanup,
-            inner_cleanup=inner_cleanup,
-            background_tolerance=background_tolerance,
-            device=background_device or device,
-            post_process_mask=post_process_mask,
-            preserve_interior=preserve_interior,
-            respect_existing_alpha=respect_existing_alpha,
-            output_format="png" if selected_tool == "remove-background-upscale" else output_format,
-        )
+    if response_mode == "image":
+        return response
 
-        if selected_tool == "remove-background":
-            logger.info("api process remove-bg start filename=%s options=%s", image.filename, background_options)
-            bg_result = await run_in_threadpool(remove_background, raw, background_options)
-            logger.info(
-                "api process remove-bg complete filename=%s output=%sx%s engine=%s elapsed=%.1fs",
-                image.filename,
-                bg_result.width,
-                bg_result.height,
-                bg_result.engine,
-                time.perf_counter() - started,
-            )
-            stem = _safe_stem(image.filename)
-            filename = f"{stem}-transparent.{bg_result.extension}"
-            job = save_job_result(
-                tool=selected_tool,
-                source_filename=image.filename,
-                output_filename=filename,
-                data=bg_result.data,
-                input_metadata=metadata,
-                output_width=bg_result.width,
-                output_height=bg_result.height,
-                output_format=bg_result.extension,
-                engine=bg_result.engine,
-                settings=vars(background_options),
-            )
-            headers = {
-                "Content-Disposition": f'attachment; filename="{filename}"',
-                "X-Background-Engine": bg_result.engine,
-                "X-Output-Width": str(bg_result.width),
-                "X-Output-Height": str(bg_result.height),
-                "X-Job-Id": str(job["id"]),
-                "X-Download-URL": str(job["download_url"]),
-            }
-            return _automation_response(
-                request, selected_response_mode, bg_result.data, bg_result.media_type, filename, job, headers
-            )
-
-        output_format = output_format.lower().strip()
-        if output_format not in SUPPORTED_BG_FORMATS:
-            raise ValueError("All-in-one output format must be png or webp so transparency is preserved.")
-
-        upscale_options = UpscaleOptions(
-            scale=scale,
-            mode=mode,
-            face_enhance=face_enhance,
-            denoise=denoise,
-            tile=tile,
-            device=upscale_device or device,
-            output_format=output_format,
-            target_width=target_width,
-            target_height=target_height,
-        )
-        _validate_upscale_resolution(metadata, upscale_options)
-        logger.info(
-            "api process all-in-one start filename=%s background=%s upscale=%s",
-            image.filename,
-            background_options,
-            upscale_options,
-        )
-        bg_result = await run_in_threadpool(remove_background, raw, background_options)
-        result = await run_in_threadpool(upscale_image, bg_result.data, upscale_options)
-        logger.info(
-            "api process all-in-one complete filename=%s output=%sx%s background_engine=%s upscale_engine=%s elapsed=%.1fs",
-            image.filename,
-            result.width,
-            result.height,
-            bg_result.engine,
-            result.engine,
-            time.perf_counter() - started,
-        )
-        stem = _safe_stem(image.filename)
-        filename = f"{stem}-transparent-upscaled-{result.width}x{result.height}.{result.extension}"
-        pipeline_engine = f"{bg_result.engine} -> {result.engine}"
-        job = save_job_result(
-            tool=selected_tool,
-            source_filename=image.filename,
-            output_filename=filename,
-            data=result.data,
-            input_metadata=metadata,
-            output_width=result.width,
-            output_height=result.height,
-            output_format=result.extension,
-            engine=pipeline_engine,
-            settings={"background": vars(background_options), "upscale": vars(upscale_options)},
-        )
-        headers = {
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "X-Background-Engine": bg_result.engine,
-            "X-Upscaler-Engine": result.engine,
-            "X-Pipeline-Engine": pipeline_engine,
-            "X-Output-Width": str(result.width),
-            "X-Output-Height": str(result.height),
-            "X-Job-Id": str(job["id"]),
-            "X-Download-URL": str(job["download_url"]),
-        }
-        return _automation_response(request, selected_response_mode, result.data, result.media_type, filename, job, headers)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return JSONResponse(_process_json_payload(request, response, tool))
 
 
 @app.post("/api/upscale")

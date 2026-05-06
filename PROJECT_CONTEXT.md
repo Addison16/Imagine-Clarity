@@ -1,6 +1,6 @@
 # Imagine Clarity Project Context
 
-Last updated: 2026-05-03
+Last updated: 2026-05-04
 
 ## What This Is
 
@@ -23,6 +23,8 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - Saved Jobs panel backed by persisted Docker storage.
 - Saved Jobs supports deleting individual results and clearing recent jobs after a UI confirmation prompt.
 - Runtime Diagnostics panel backed by `/api/diagnostics`.
+- Unified automation endpoint at `/api/process` for tool selection + image/json response modes.
+- Capability discovery endpoint at `/api/capabilities`.
 - Presets for Smart Auto, logo/sticker, photo, artwork, product cutout, print-ready upscale, and transparent sticker workflows.
 - Preview background controls for checkerboard, white, gray, and black result inspection.
 - PNG, JPEG, and WEBP output for upscaling.
@@ -107,7 +109,8 @@ node --check app\static\app.js
 - Added saved jobs, persisted output downloads, runtime diagnostics, presets, batch UI processing, and preview background controls.
 - Added Saved Jobs delete/clear controls backed by `DELETE /api/jobs/{job_id}` and `DELETE /api/jobs`.
 - Added alpha-aware transparent resize plus edge trim, fringe cleanup, and inner cleanup controls for cleaner transparent cutouts.
-- Added unified automation API endpoint `/api/process` and capability discovery at `/api/capabilities`.
+- Added optional API-key gate for automation endpoint via `CLARITY_API_KEY` and `X-API-Key` header.
+- Added optional CORS allowlist via `CORS_ALLOW_ORIGINS` and optional job/result TTL cleanup via `JOB_TTL_HOURS`.
 
 ## Known Limits And Next Improvements
 
