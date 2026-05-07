@@ -33,6 +33,7 @@ from app.jobs import (
     save_job_result,
     storage_summary,
 )
+from app.batch_jobs import build_batch_zip, create_batch, get_batch, list_batches
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -41,6 +42,7 @@ MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
 MAX_UPSCALE_FACTOR = 8.0
+MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
 API_KEY = os.getenv("CLARITY_API_KEY", "").strip()
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
 SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale")
@@ -80,7 +82,6 @@ def health() -> dict[str, object]:
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": list(SUPPORTED_TOOLS),
-        "tools": TOOLS,
         "history_limit": HISTORY_LIMIT,
         "cors_allow_origins": CORS_ORIGINS or ["*"],
         "runtime": _runtime_info(),
@@ -88,8 +89,86 @@ def health() -> dict[str, object]:
 
 
 @app.get("/api/jobs")
-def api_jobs(limit: int = 25) -> dict[str, object]:
+def api_jobs(limit: int = 25, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
     return {"jobs": list_jobs(limit)}
+
+
+@app.get("/api/batches")
+def api_batches(limit: int = 10, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    return {"batches": list_batches(limit)}
+
+
+@app.get("/api/batches/{batch_id}")
+def api_batch(batch_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    batch = get_batch(batch_id)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found.")
+    return batch
+
+
+@app.get("/api/batches/{batch_id}/zip")
+def api_batch_zip(batch_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
+    payload = build_batch_zip(batch_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Batch not found.")
+    data, filename = payload
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/batches")
+async def api_create_batch(
+    images: list[UploadFile] = File(...),
+    tool: str = Form("upscale"),
+    scale: float = Form(4.0),
+    mode: str = Form("auto"),
+    face_enhance: bool = Form(False),
+    denoise: float = Form(0.55),
+    tile: int = Form(512),
+    device: str = Form("auto"),
+    output_format: str = Form("png"),
+    target_width: int | None = Form(None),
+    target_height: int | None = Form(None),
+    model: str = Form("auto"),
+    cut_mode: str = Form("balanced"),
+    alpha_matting: bool = Form(True),
+    edge_refine: int = Form(8),
+    edge_trim: int = Form(0),
+    fringe_cleanup: int = Form(0),
+    inner_cleanup: int = Form(0),
+    background_tolerance: int = Form(34),
+    post_process_mask: bool = Form(True),
+    preserve_interior: bool = Form(True),
+    respect_existing_alpha: bool = Form(True),
+    upscale_device: str = Form("auto"),
+    background_device: str = Form("auto"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    if len(images) > MAX_BATCH_FILES:
+        raise HTTPException(status_code=400, detail=f"Batch limit exceeded. Max {MAX_BATCH_FILES} files per batch.")
+    files: list[tuple[str, bytes]] = []
+    for upload in images:
+        raw, _ = await _read_validated_upload(upload)
+        files.append((upload.filename or "image.png", raw))
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded.")
+    if tool == "remove-background":
+        settings = vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format=output_format))
+    elif tool == "remove-background-upscale":
+        settings = {"background": vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format="png")), "upscale": vars(UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height))}
+    else:
+        settings = vars(UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height))
+    batch = create_batch(files, tool, settings)
+    return {"batch": batch}
 
 
 @app.delete("/api/jobs")
