@@ -81,6 +81,7 @@ let maxUpscaleFactor = 8;
 let selectedImageSize = null;
 let compareActive = false;
 let historyPreviewEnabled = true;
+let currentBatchId = null;
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
   value: option.value,
@@ -846,6 +847,22 @@ function renderBatchResults(results) {
     return;
   }
   batchResults.classList.remove("hidden");
+  if (currentBatchId) {
+    const actions = document.createElement("div");
+    actions.className = "job-actions";
+    const retryFailed = document.createElement("button");
+    retryFailed.className = "small-button";
+    retryFailed.type = "button";
+    retryFailed.textContent = "Retry Failed";
+    retryFailed.addEventListener("click", () => retryBatch(currentBatchId, true).catch((error) => setStatus("Error", "error", error.message || "Retry failed.")));
+    const rerunAll = document.createElement("button");
+    rerunAll.className = "small-button";
+    rerunAll.type = "button";
+    rerunAll.textContent = "Run Again";
+    rerunAll.addEventListener("click", () => retryBatch(currentBatchId, false).catch((error) => setStatus("Error", "error", error.message || "Rerun failed.")));
+    actions.append(retryFailed, rerunAll);
+    batchResults.append(actions);
+  }
   results.forEach((result) => {
     const row = document.createElement("div");
     row.className = `batch-row ${result.ok ? "" : "error"}`.trim();
@@ -865,6 +882,33 @@ function renderBatchResults(results) {
     }
     batchResults.append(row);
   });
+}
+
+async function retryBatch(batchId, failedOnly = true) {
+  const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/retry?failed_only=${failedOnly ? "true" : "false"}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Could not queue retry batch.");
+  }
+  const batch = (await response.json()).batch;
+  currentBatchId = batch.id;
+  setStatus("Processing", "busy", failedOnly ? "Retrying failed items in background." : "Re-running batch in background.");
+  const completed = await pollBatch(batch.id);
+  const batchItems = completed.items || [];
+  renderBatchResults(
+    batchItems.map((item) => ({
+      ok: item.status === "done",
+      name: item.filename,
+      summary: item.result_filename || "Done",
+      error: item.error || "Failed",
+      downloadUrl: item.result_download_url || "#",
+      filename: item.result_filename || item.filename,
+    })),
+  );
+  await loadHistory();
+  await loadDiagnostics();
 }
 
 function renderHistory(jobs) {
@@ -1290,6 +1334,7 @@ form.addEventListener("submit", async (event) => {
       const batch = (await batchResponse.json()).batch;
       setStatus("Processing", "busy", "Batch queued on server. You can close this browser and return later.");
       const completed = await pollBatch(batch.id);
+      currentBatchId = batch.id;
       const batchItems = completed.items || [];
       const ok = batchItems.filter((item) => item.status === "done");
       const failed = batchItems.filter((item) => item.status === "error");

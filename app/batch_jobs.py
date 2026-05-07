@@ -121,6 +121,23 @@ def create_batch(files: list[tuple[str, bytes]], tool: str, settings: dict[str, 
     return entry
 
 
+def retry_batch(batch_id: str, failed_only: bool = True) -> dict[str, Any] | None:
+    original = get_batch_raw(batch_id)
+    if not original:
+        return None
+    files: list[tuple[str, bytes]] = []
+    for item in original.get("items", []):
+        status = item.get("status")
+        if failed_only and status != "error":
+            continue
+        source = Path(str(item.get("source_path", "")))
+        if source.exists() and source.is_file():
+            files.append((str(item.get("filename") or source.name), source.read_bytes()))
+    if not files:
+        return None
+    return create_batch(files, str(original.get("tool") or "upscale"), dict(original.get("settings") or {}))
+
+
 def _process_batch(batch_id: str) -> None:
     _update_batch(batch_id, lambda b: b.update({"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}))
     batch = get_batch_raw(batch_id)

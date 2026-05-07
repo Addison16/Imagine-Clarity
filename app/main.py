@@ -33,7 +33,7 @@ from app.jobs import (
     save_job_result,
     storage_summary,
 )
-from app.batch_jobs import build_batch_zip, create_batch, get_batch, list_batches
+from app.batch_jobs import build_batch_zip, create_batch, get_batch, list_batches, retry_batch
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -168,6 +168,20 @@ async def api_create_batch(
     else:
         settings = vars(UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height))
     batch = create_batch(files, tool, settings)
+    return {"batch": batch}
+
+
+@app.post("/api/batches/{batch_id}/retry")
+def api_retry_batch(
+    batch_id: str,
+    failed_only: bool = True,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    batch = retry_batch(batch_id, failed_only=failed_only)
+    if not batch:
+        raise HTTPException(status_code=404, detail="Batch not found or no matching items to retry.")
     return {"batch": batch}
 
 
