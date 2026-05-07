@@ -175,7 +175,7 @@ def main() -> int:
     )
     response.raise_for_status()
     api_result = response.json()
-    assert api_result["ok"] is True, api_result
+    assert api_result["job_id"], api_result
     assert api_result["download_url"].startswith(base_url), api_result
     assert api_result["relative_download_url"].startswith("/api/results/"), api_result
     saved = requests.get(api_result["download_url"], timeout=10)

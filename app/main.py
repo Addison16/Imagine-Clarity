@@ -80,7 +80,6 @@ def health() -> dict[str, object]:
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": list(SUPPORTED_TOOLS),
-        "tools": TOOLS,
         "history_limit": HISTORY_LIMIT,
         "cors_allow_origins": CORS_ORIGINS or ["*"],
         "runtime": _runtime_info(),
@@ -192,7 +191,7 @@ def _process_json_payload(request: Request, response: StreamingResponse, tool: s
     }
 
 
-@app.post("/api/process")
+@app.post("/api/process", response_model=None)
 async def api_process(
     request: Request,
     image: UploadFile = File(...),
@@ -220,7 +219,7 @@ async def api_process(
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
-) -> StreamingResponse | JSONResponse:
+):
     _require_api_key(x_api_key, authorization)
     tool = tool.strip().lower()
     response_mode = response_mode.strip().lower()
