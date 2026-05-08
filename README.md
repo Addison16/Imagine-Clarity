@@ -80,8 +80,9 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Conservative`: alpha-aware Lanczos plus mild sharpening when exact geometry, text, transparent PNGs, or logos matter more than generated texture.
 - `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
-- `Batch processing`: select multiple images and the UI processes them one at a time with per-file download links.
-- `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
+- `Batch processing`: select multiple images and the server runs them in the background one at a time. Closing the browser does not cancel the queued batch.
+- `Batch ZIP downloads`: completed batch outputs can be downloaded together as one ZIP file, with per-image result links still available.
+- `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download, preview, and before/after comparison when a source preview is available. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
 - `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
 - `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
 
@@ -156,7 +157,7 @@ http://localhost:8794
 
 The first neural upscale downloads model weights into the `upscaler-models` Docker volume. Conservative mode runs immediately.
 
-Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. This keeps downloads available in the Saved Jobs panel even after the browser refreshes.
+Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. Source previews for new single-image jobs are stored at `/tmp/upscaler/sources`; batch source files are stored under `/tmp/upscaler/batches`. This keeps downloads, previews, and completed batch ZIPs available after the browser refreshes or closes.
 
 ## Hardware Auto-Detection
 
@@ -299,6 +300,45 @@ Download a saved result:
 curl.exe -L http://localhost:8794/api/results/JOB_ID --output result.png
 ```
 
+Download a saved source preview, when available:
+
+```powershell
+curl.exe -L http://localhost:8794/api/sources/JOB_ID --output original.png
+```
+
+Create a server-side batch:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/batches `
+  -F "images=@input-1.png" `
+  -F "images=@input-2.png" `
+  -F "tool=remove-background-upscale" `
+  -F "model=logo" `
+  -F "cut_mode=balanced" `
+  -F "scale=4" `
+  -F "mode=auto" `
+  -F "output_format=png"
+```
+
+List and inspect batches:
+
+```powershell
+curl.exe http://localhost:8794/api/batches
+curl.exe http://localhost:8794/api/batches/BATCH_ID
+```
+
+Download all completed images from a batch:
+
+```powershell
+curl.exe -L http://localhost:8794/api/batches/BATCH_ID/zip --output batch.zip
+```
+
+Preview an original source image from a batch item:
+
+```powershell
+curl.exe -L http://localhost:8794/api/batches/BATCH_ID/source/ITEM_ID --output original.png
+```
+
 Delete one saved job:
 
 ```powershell
@@ -345,6 +385,8 @@ curl.exe -X POST http://localhost:8794/api/process `
 
 - `HOST_PORT`: host port, default `8794`.
 - `MAX_UPLOAD_MB`: upload limit, default `64`.
+- `MAX_BATCH_FILES`: maximum files in one batch, default `100`.
+- `MAX_BATCH_TOTAL_MB`: maximum total upload size for one batch, default `512`.
 - `MAX_IMAGE_DIMENSION`: maximum input side and generated output side, default `16384` for a 16K x 16K cap.
 - `UPSCALER_DEVICE`: `auto`, `cpu`, or `cuda`. The provided image installs CPU PyTorch wheels for broad compatibility.
 - GPU mode uses `Dockerfile.gpu`, CUDA-enabled PyTorch wheels, and `onnxruntime-gpu` so both upscaling and background removal can use the NVIDIA GPU. It requires an NVIDIA driver plus Docker's NVIDIA runtime.
@@ -352,6 +394,7 @@ curl.exe -X POST http://localhost:8794/api/process `
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
 - `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
 - `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
+- `BATCH_HISTORY_LIMIT`: number of saved batch records kept in the JSON history, default `50`.
 - `JOB_TTL_HOURS`: optional auto-cleanup window for saved jobs/results. `0` disables TTL cleanup (default).
 - `CLARITY_API_KEY`: optional API key for `/api/process`. If set, callers must send `X-API-Key: <value>` or `Authorization: Bearer <value>`.
 - `CORS_ALLOW_ORIGINS`: comma-separated CORS allowlist. Default is `*` for local/dev convenience.

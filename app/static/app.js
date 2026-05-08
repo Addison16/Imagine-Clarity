@@ -78,6 +78,8 @@ let busyTimer = null;
 let maxUploadMb = 64;
 let maxImageDimension = 16384;
 let maxUpscaleFactor = 8;
+let maxBatchFiles = 100;
+let maxBatchTotalMb = 512;
 let selectedImageSize = null;
 let compareActive = false;
 let historyPreviewEnabled = true;
@@ -307,7 +309,12 @@ function setProgress(percent, detail = "") {
 }
 
 function revoke(url) {
-  if (url) URL.revokeObjectURL(url);
+  if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
+}
+
+function absoluteUrl(url) {
+  if (!url) return "";
+  return new URL(url, window.location.origin).href;
 }
 
 function formatBytes(bytes) {
@@ -546,8 +553,10 @@ async function loadRuntime() {
     maxUploadMb = health.max_upload_mb || maxUploadMb;
     maxImageDimension = health.max_image_dimension || maxImageDimension;
     maxUpscaleFactor = health.max_upscale_factor || maxUpscaleFactor;
+    maxBatchFiles = health.max_batch_files || maxBatchFiles;
+    maxBatchTotalMb = health.max_batch_total_mb || maxBatchTotalMb;
     document.querySelector("#drop-note").textContent =
-      `PNG, JPG, or WEBP supported. Max ${resolutionLimitLabel()} per side.`;
+      `PNG, JPG, or WEBP supported. Max ${resolutionLimitLabel()} per side. Batches up to ${maxBatchFiles} files or ${maxBatchTotalMb} MB.`;
     const runtime = health.runtime || {};
     if (runtime.cuda_available) {
       setRuntime(`GPU: ${runtime.cuda_device || "CUDA"}`, "good");
@@ -568,6 +577,15 @@ async function setFiles(files) {
   const list = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
   if (!list.length) {
     setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, or WEBP.");
+    return;
+  }
+  if (list.length > maxBatchFiles) {
+    setStatus("Error", "error", `Batch limit is ${maxBatchFiles} images.`);
+    return;
+  }
+  const batchBytes = list.reduce((total, file) => total + file.size, 0);
+  if (batchBytes > maxBatchTotalMb * 1024 * 1024) {
+    setStatus("Error", "error", `Batch upload exceeds ${maxBatchTotalMb} MB total.`);
     return;
   }
   selectedFiles = list;
@@ -840,45 +858,174 @@ function setPreviewBackground(value = "checker") {
   });
 }
 
-function renderBatchResults(results) {
+function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summary, compare = false }) {
+  const resolvedResult = absoluteUrl(resultUrl || downloadUrl);
+  const resolvedSource = absoluteUrl(sourceUrl);
+  if (!resolvedResult) return;
+
+  revoke(beforeUrl);
+  revoke(afterUrl);
+  beforeUrl = resolvedSource || null;
+  afterUrl = resolvedResult;
+
+  if (beforeUrl) {
+    beforeImg.src = beforeUrl;
+    beforeEmpty.classList.add("hidden");
+    beforeMeta.textContent = "Original preview";
+  } else {
+    beforeImg.removeAttribute("src");
+    beforeEmpty.classList.remove("hidden");
+    beforeMeta.textContent = "No source preview";
+  }
+
+  afterImg.src = afterUrl;
+  afterEmpty.classList.add("hidden");
+  afterMeta.textContent = summary || filename || "Saved result";
+  resultSummary.textContent = summary || filename || "Saved result";
+  resultDownload.href = afterUrl;
+  resultDownload.download = filename || "result.png";
+  resultDownload.textContent = "Download Image";
+  resultActions.classList.remove("hidden");
+  engineChip.classList.add("hidden");
+  compareActive = false;
+  compareStage.classList.add("hidden");
+  compareToggle.textContent = "Compare";
+  setStep(2);
+  setStatus("Ready", "ready", `Previewing ${filename || "saved result"}.`);
+  if (compare && beforeUrl) toggleCompare();
+}
+
+function batchToResults(batch) {
+  return (batch.items || []).map((item) => {
+    const done = item.status === "done";
+    return {
+      ok: done,
+      pending: !done && item.status !== "error",
+      status: item.status || "queued",
+      name: item.filename,
+      summary: done ? item.result_filename || "Done" : `Status: ${item.status || "queued"}`,
+      error: item.error || "Failed",
+      downloadUrl: item.result_download_url || "",
+      sourceUrl: item.source_url || "",
+      filename: item.result_filename || item.filename,
+    };
+  });
+}
+
+function makePreviewThumbs(sourceUrl, resultUrl, label) {
+  const thumbs = document.createElement("button");
+  thumbs.className = "preview-thumbs";
+  if (!sourceUrl) thumbs.classList.add("single");
+  thumbs.type = "button";
+  thumbs.title = "Preview before and after";
+  thumbs.addEventListener("click", () => openStoredPreview({
+    sourceUrl,
+    resultUrl,
+    filename: label,
+    summary: label,
+    compare: Boolean(sourceUrl),
+  }));
+
+  if (sourceUrl) {
+    const before = document.createElement("img");
+    before.src = sourceUrl;
+    before.alt = "Original thumbnail";
+    thumbs.append(before);
+  }
+
+  const after = document.createElement("img");
+  after.src = resultUrl;
+  after.alt = "Result thumbnail";
+  thumbs.append(after);
+  return thumbs;
+}
+
+function renderBatchResults(results, batch = null) {
   batchResults.replaceChildren();
   if (!results.length) {
     batchResults.classList.add("hidden");
     return;
   }
   batchResults.classList.remove("hidden");
-  if (currentBatchId) {
+  if (batch || currentBatchId) {
+    const batchId = batch?.id || currentBatchId;
     const actions = document.createElement("div");
-    actions.className = "job-actions";
+    actions.className = "batch-actions";
+    if (batch) {
+      const summary = document.createElement("span");
+      summary.className = "batch-summary";
+      summary.textContent = `Batch ${batch.id.slice(0, 8)} | ${batch.completed || 0}/${batch.total || results.length} complete | ${batch.status || "queued"}`;
+      actions.append(summary);
+    }
+    if (batch?.zip_url && (batch.completed || 0) > 0) {
+      const zipLink = document.createElement("a");
+      zipLink.href = batch.zip_url;
+      zipLink.className = "secondary-button";
+      zipLink.textContent = "Download Batch ZIP";
+      actions.append(zipLink);
+    }
     const retryFailed = document.createElement("button");
     retryFailed.className = "small-button";
     retryFailed.type = "button";
     retryFailed.textContent = "Retry Failed";
-    retryFailed.addEventListener("click", () => retryBatch(currentBatchId, true).catch((error) => setStatus("Error", "error", error.message || "Retry failed.")));
+    retryFailed.addEventListener("click", () => retryBatch(batchId, true).catch((error) => setStatus("Error", "error", error.message || "Retry failed.")));
     const rerunAll = document.createElement("button");
     rerunAll.className = "small-button";
     rerunAll.type = "button";
     rerunAll.textContent = "Run Again";
-    rerunAll.addEventListener("click", () => retryBatch(currentBatchId, false).catch((error) => setStatus("Error", "error", error.message || "Rerun failed.")));
+    rerunAll.addEventListener("click", () => retryBatch(batchId, false).catch((error) => setStatus("Error", "error", error.message || "Rerun failed.")));
     actions.append(retryFailed, rerunAll);
     batchResults.append(actions);
   }
   results.forEach((result) => {
     const row = document.createElement("div");
-    row.className = `batch-row ${result.ok ? "" : "error"}`.trim();
+    row.className = `batch-row ${result.ok ? "" : result.pending ? "pending" : "error"}`.trim();
     const copy = document.createElement("div");
     const title = document.createElement("strong");
     title.textContent = result.name;
     const meta = document.createElement("span");
-    meta.textContent = result.ok ? result.summary : result.error;
+    meta.textContent = result.ok || result.pending ? result.summary : result.error;
     copy.append(title, meta);
+    if (historyPreviewEnabled && result.ok && result.downloadUrl) {
+      copy.append(makePreviewThumbs(result.sourceUrl, result.downloadUrl, result.filename || result.name));
+    }
     row.append(copy);
     if (result.ok) {
+      const actions = document.createElement("div");
+      actions.className = "job-actions";
+      if (historyPreviewEnabled) {
+        const preview = document.createElement("button");
+        preview.className = "small-button";
+        preview.type = "button";
+        preview.textContent = "Preview";
+        preview.addEventListener("click", () => openStoredPreview({
+          sourceUrl: result.sourceUrl,
+          resultUrl: result.downloadUrl,
+          filename: result.filename,
+          summary: result.summary,
+        }));
+        actions.append(preview);
+        if (result.sourceUrl) {
+          const compare = document.createElement("button");
+          compare.className = "small-button";
+          compare.type = "button";
+          compare.textContent = "Compare";
+          compare.addEventListener("click", () => openStoredPreview({
+            sourceUrl: result.sourceUrl,
+            resultUrl: result.downloadUrl,
+            filename: result.filename,
+            summary: result.summary,
+            compare: true,
+          }));
+          actions.append(compare);
+        }
+      }
       const link = document.createElement("a");
       link.href = result.downloadUrl;
       link.download = result.filename;
       link.textContent = "Download";
-      row.append(link);
+      actions.append(link);
+      row.append(actions);
     }
     batchResults.append(row);
   });
@@ -897,29 +1044,86 @@ async function retryBatch(batchId, failedOnly = true) {
   setStatus("Processing", "busy", failedOnly ? "Retrying failed items in background." : "Re-running batch in background.");
   const completed = await pollBatch(batch.id);
   const batchItems = completed.items || [];
-  renderBatchResults(
-    batchItems.map((item) => ({
-      ok: item.status === "done",
-      name: item.filename,
-      summary: item.result_filename || "Done",
-      error: item.error || "Failed",
-      downloadUrl: item.result_download_url || "#",
-      filename: item.result_filename || item.filename,
-    })),
-  );
+  renderBatchResults(batchToResults({ ...completed, items: batchItems }), completed);
   await loadHistory();
   await loadDiagnostics();
 }
 
-function renderHistory(jobs) {
+function renderHistory(jobs, batches = []) {
   historyList.replaceChildren();
-  if (!jobs.length) {
+  if (!jobs.length && !batches.length) {
     const empty = document.createElement("p");
     empty.className = "muted-copy";
-    empty.textContent = "No saved jobs yet. Process an image and the output will appear here.";
+    empty.textContent = "No saved jobs or batches yet. Process images and the outputs will appear here.";
     historyList.append(empty);
     return;
   }
+
+  if (batches.length) {
+    const batchHeading = document.createElement("h3");
+    batchHeading.className = "history-section-title";
+    batchHeading.textContent = "Batch Jobs";
+    historyList.append(batchHeading);
+    batches.forEach((batch) => {
+      const card = document.createElement("div");
+      card.className = "batch-card";
+      const header = document.createElement("div");
+      header.className = "batch-card-header";
+      const copy = document.createElement("div");
+      const title = document.createElement("strong");
+      title.textContent = `Batch ${String(batch.id || "").slice(0, 8)}`;
+      const meta = document.createElement("span");
+      meta.textContent =
+        `${batch.tool || "batch"} | ${batch.completed || 0}/${batch.total || 0} complete | ${batch.status || "queued"} | ${formatDate(batch.created_at)}`;
+      copy.append(title, meta);
+      const actions = document.createElement("div");
+      actions.className = "job-actions";
+      if (batch.zip_url && (batch.completed || 0) > 0) {
+        const zipLink = document.createElement("a");
+        zipLink.href = batch.zip_url;
+        zipLink.textContent = "ZIP";
+        actions.append(zipLink);
+      }
+      const openButton = document.createElement("button");
+      openButton.className = "small-button";
+      openButton.type = "button";
+      openButton.textContent = "Open";
+      openButton.addEventListener("click", () => {
+        currentBatchId = batch.id;
+        renderBatchResults(batchToResults(batch), batch);
+        setStatus("Ready", "ready", `Loaded batch ${String(batch.id || "").slice(0, 8)}.`);
+      });
+      actions.append(openButton);
+      header.append(copy, actions);
+      card.append(header);
+
+      if (historyPreviewEnabled) {
+        const itemGrid = document.createElement("div");
+        itemGrid.className = "batch-preview-grid";
+        (batch.items || []).forEach((item) => {
+          const itemRow = document.createElement("div");
+          itemRow.className = `batch-mini ${item.status === "done" ? "" : "pending"}`.trim();
+          if (item.status === "done" && item.result_download_url) {
+            itemRow.append(makePreviewThumbs(item.source_url, item.result_download_url, item.result_filename || item.filename));
+          }
+          const label = document.createElement("span");
+          label.textContent = item.result_filename || item.filename;
+          itemRow.append(label);
+          itemGrid.append(itemRow);
+        });
+        card.append(itemGrid);
+      }
+      historyList.append(card);
+    });
+  }
+
+  if (jobs.length) {
+    const jobHeading = document.createElement("h3");
+    jobHeading.className = "history-section-title";
+    jobHeading.textContent = "Image Jobs";
+    historyList.append(jobHeading);
+  }
+
   jobs.forEach((job) => {
     const row = document.createElement("div");
     row.className = "job-row";
@@ -931,6 +1135,9 @@ function renderHistory(jobs) {
     meta.textContent =
       `${job.tool || "job"} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`;
     copy.append(title, meta);
+    if (historyPreviewEnabled && job.download_url) {
+      copy.append(makePreviewThumbs(job.source_download_url, job.download_url, job.filename || job.source_filename || "Processed image"));
+    }
     const link = document.createElement("a");
     link.href = job.download_url;
     link.download = job.filename || "result.png";
@@ -942,14 +1149,27 @@ function renderHistory(jobs) {
       previewButton.className = "small-button";
       previewButton.type = "button";
       previewButton.textContent = "Preview";
-      previewButton.addEventListener("click", () => {
-        afterImg.src = job.download_url;
-        afterEmpty.classList.add("hidden");
-        resultActions.classList.add("hidden");
-        setStep(2);
-        setStatus("Ready", "ready", `Previewing saved job: ${job.filename || "result"}`);
-      });
+      previewButton.addEventListener("click", () => openStoredPreview({
+        sourceUrl: job.source_download_url,
+        resultUrl: job.download_url,
+        filename: job.filename || "result.png",
+        summary: meta.textContent,
+      }));
       actions.append(previewButton);
+      if (job.source_download_url) {
+        const compareButton = document.createElement("button");
+        compareButton.className = "small-button";
+        compareButton.type = "button";
+        compareButton.textContent = "Compare";
+        compareButton.addEventListener("click", () => openStoredPreview({
+          sourceUrl: job.source_download_url,
+          resultUrl: job.download_url,
+          filename: job.filename || "result.png",
+          summary: meta.textContent,
+          compare: true,
+        }));
+        actions.append(compareButton);
+      }
     }
     const deleteButton = document.createElement("button");
     deleteButton.className = "small-button danger-button";
@@ -964,10 +1184,14 @@ function renderHistory(jobs) {
 
 async function loadHistory() {
   try {
-    const response = await fetch("/api/jobs?limit=10", { cache: "no-store" });
-    if (!response.ok) throw new Error("history failed");
-    const body = await response.json();
-    renderHistory(body.jobs || []);
+    const [jobsResponse, batchesResponse] = await Promise.all([
+      fetch("/api/jobs?limit=20", { cache: "no-store" }),
+      fetch("/api/batches?limit=10", { cache: "no-store" }),
+    ]);
+    if (!jobsResponse.ok || !batchesResponse.ok) throw new Error("history failed");
+    const jobsBody = await jobsResponse.json();
+    const batchesBody = await batchesResponse.json();
+    renderHistory(jobsBody.jobs || [], batchesBody.batches || []);
   } catch {
     historyList.innerHTML = '<p class="muted-copy">Could not load saved jobs.</p>';
   }
@@ -1040,8 +1264,8 @@ function renderDiagnostics(data) {
     ["Hardware", runtime.cuda_available ? `NVIDIA GPU: ${runtime.cuda_device || "CUDA"}` : "CPU runtime"],
     ["Available devices", Array.isArray(runtime.available_devices) ? runtime.available_devices.join(", ") : "cpu"],
     ["ONNX providers", Array.isArray(runtime.onnx_providers) ? runtime.onnx_providers.join(", ") : "Unknown"],
-    ["Saved outputs", `${storage.saved_jobs || 0} jobs | ${formatBytes(storage.saved_bytes || 0)}`],
-    ["Limits", `${limits.max_upload_mb || maxUploadMb} MB upload | ${limits.max_image_dimension || maxImageDimension}px max side | ${limits.max_upscale_factor || maxUpscaleFactor}x max upscale`],
+    ["Saved outputs", `${storage.saved_jobs || 0} jobs | ${formatBytes(storage.saved_bytes || 0)} output | ${formatBytes(storage.saved_source_bytes || 0)} source`],
+    ["Limits", `${limits.max_upload_mb || maxUploadMb} MB upload | ${limits.max_batch_files || maxBatchFiles} files / ${limits.max_batch_total_mb || maxBatchTotalMb} MB batch | ${limits.max_image_dimension || maxImageDimension}px max side | ${limits.max_upscale_factor || maxUpscaleFactor}x max upscale`],
   ];
   diagnosticsPanel.replaceChildren();
   rows.forEach(([label, value]) => {
@@ -1272,6 +1496,7 @@ function showResult(blob, response, fallbackName) {
   }
 
   const downloadUrl = response.headers.get("X-Download-URL") || afterUrl;
+  const sourceUrl = response.headers.get("X-Source-URL") || beforeUrl;
   const filename = filenameFromResponse(response, fallbackName || "result.png");
   resultDownload.href = downloadUrl;
   resultDownload.download = filename;
@@ -1283,6 +1508,7 @@ function showResult(blob, response, fallbackName) {
     extension,
     engine,
     downloadUrl,
+    sourceUrl,
     filename,
     summary: `${width} x ${height} ${extension} | ${formatBytes(blob.size)}`,
   };
@@ -1332,31 +1558,22 @@ form.addEventListener("submit", async (event) => {
         throw new Error(body.detail || `Batch failed with ${batchResponse.status}`);
       }
       const batch = (await batchResponse.json()).batch;
+      currentBatchId = batch.id;
+      renderBatchResults(batchToResults(batch), batch);
       setStatus("Processing", "busy", "Batch queued on server. You can close this browser and return later.");
       const completed = await pollBatch(batch.id);
-      currentBatchId = batch.id;
       const batchItems = completed.items || [];
       const ok = batchItems.filter((item) => item.status === "done");
       const failed = batchItems.filter((item) => item.status === "error");
-      renderBatchResults(
-        batchItems.map((item) => ({
-          ok: item.status === "done",
-          name: item.filename,
-          summary: item.result_filename || "Done",
-          error: item.error || "Failed",
-          downloadUrl: item.result_download_url || "#",
-          filename: item.result_filename || item.filename,
-        })),
-      );
+      renderBatchResults(batchToResults(completed), completed);
       if (ok[0]?.result_download_url) {
-        afterImg.src = ok[0].result_download_url;
-        afterEmpty.classList.add("hidden");
+        openStoredPreview({
+          sourceUrl: ok[0].source_url,
+          resultUrl: ok[0].result_download_url,
+          filename: ok[0].result_filename || ok[0].filename,
+          summary: ok[0].result_filename || "Batch result",
+        });
       }
-      const zipLink = document.createElement("a");
-      zipLink.href = `/api/batches/${batch.id}/zip`;
-      zipLink.className = "secondary-button";
-      zipLink.textContent = "Download Batch ZIP";
-      batchResults.prepend(zipLink);
       await loadHistory();
       await loadDiagnostics();
       setStatus("Complete", "complete", `Batch complete. ${ok.length} finished, ${failed.length} failed.`);

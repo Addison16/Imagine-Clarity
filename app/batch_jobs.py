@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -20,6 +21,7 @@ from app.upscaler import UpscaleOptions, upscale_image
 STORAGE_DIR = Path(os.getenv("STORAGE_DIR", "/tmp/upscaler"))
 BATCH_DIR = STORAGE_DIR / "batches"
 BATCH_HISTORY = STORAGE_DIR / "batches.json"
+BATCH_HISTORY_LIMIT = int(os.getenv("BATCH_HISTORY_LIMIT", "50"))
 
 _lock = threading.Lock()
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="batch-worker")
@@ -115,10 +117,14 @@ def create_batch(files: list[tuple[str, bytes]], tool: str, settings: dict[str, 
     with _lock:
         batches = _read_batches()
         batches.insert(0, entry)
+        overflow = batches[BATCH_HISTORY_LIMIT:]
+        for old_batch in overflow:
+            _delete_batch_sources(str(old_batch.get("id") or ""))
+        batches = batches[:BATCH_HISTORY_LIMIT]
         _write_batches(batches)
 
     _executor.submit(_process_batch, batch_id)
-    return entry
+    return _public_batch(entry)
 
 
 def retry_batch(batch_id: str, failed_only: bool = True) -> dict[str, Any] | None:
@@ -213,6 +219,34 @@ def build_batch_zip(batch_id: str) -> tuple[bytes, str] | None:
     return stream.getvalue(), f"batch-{batch_id[:8]}.zip"
 
 
+def batch_source_path(batch_id: str, item_id: str) -> Path | None:
+    batch = get_batch_raw(batch_id)
+    if not batch:
+        return None
+    for item in batch.get("items", []):
+        if str(item.get("id")) != str(item_id):
+            continue
+        source = Path(str(item.get("source_path", "")))
+        batch_dir = BATCH_DIR / batch_id / "source"
+        try:
+            if source.exists() and source.is_file() and source.resolve().is_relative_to(batch_dir.resolve()):
+                return source
+        except (OSError, ValueError):
+            return None
+    return None
+
+
+def _delete_batch_sources(batch_id: str) -> None:
+    if not batch_id or Path(batch_id).name != batch_id:
+        return
+    batch_dir = BATCH_DIR / batch_id
+    try:
+        if batch_dir.exists() and batch_dir.is_dir():
+            shutil.rmtree(batch_dir)
+    except OSError:
+        return
+
+
 def _process_one(raw: bytes, filename: str, tool: str, settings: dict[str, Any]):
     from PIL import Image
     import io as _io
@@ -236,10 +270,15 @@ def _process_one(raw: bytes, filename: str, tool: str, settings: dict[str, Any])
 
 def _public_batch(batch: dict[str, Any]) -> dict[str, Any]:
     redacted = dict(batch)
+    batch_id = str(redacted.get("id") or "")
+    redacted["zip_url"] = f"/api/batches/{batch_id}/zip" if batch_id else None
     redacted.pop("settings", None)
     items: list[dict[str, Any]] = []
     for item in batch.get("items", []):
         clean = dict(item)
+        item_id = str(clean.get("id") or "")
+        if batch_id and item_id:
+            clean["source_url"] = f"/api/batches/{batch_id}/source/{item_id}"
         clean.pop("source_path", None)
         items.append(clean)
     redacted["items"] = items

@@ -31,9 +31,10 @@ from app.jobs import (
     list_jobs,
     result_path,
     save_job_result,
+    source_path,
     storage_summary,
 )
-from app.batch_jobs import build_batch_zip, create_batch, get_batch, list_batches, retry_batch
+from app.batch_jobs import batch_source_path, build_batch_zip, create_batch, get_batch, list_batches, retry_batch
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -43,6 +44,8 @@ MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
 MAX_UPSCALE_FACTOR = 8.0
 MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
+MAX_BATCH_TOTAL_MB = int(os.getenv("MAX_BATCH_TOTAL_MB", "512"))
+MAX_BATCH_TOTAL_BYTES = MAX_BATCH_TOTAL_MB * 1024 * 1024
 API_KEY = os.getenv("CLARITY_API_KEY", "").strip()
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
 SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale")
@@ -79,6 +82,8 @@ def health() -> dict[str, object]:
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_image_dimension": MAX_IMAGE_DIMENSION,
         "max_upscale_factor": MAX_UPSCALE_FACTOR,
+        "max_batch_files": MAX_BATCH_FILES,
+        "max_batch_total_mb": MAX_BATCH_TOTAL_MB,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
         "tools": list(SUPPORTED_TOOLS),
@@ -123,6 +128,15 @@ def api_batch_zip(batch_id: str, x_api_key: str | None = Header(default=None), a
     )
 
 
+@app.get("/api/batches/{batch_id}/source/{item_id}")
+def api_batch_source(batch_id: str, item_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> FileResponse:
+    _require_api_key(x_api_key, authorization)
+    path = batch_source_path(batch_id, item_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Batch source image not found.")
+    return FileResponse(path, filename=path.name)
+
+
 @app.post("/api/batches")
 async def api_create_batch(
     images: list[UploadFile] = File(...),
@@ -153,21 +167,40 @@ async def api_create_batch(
     authorization: str | None = Header(default=None),
 ) -> dict[str, object]:
     _require_api_key(x_api_key, authorization)
+    normalized_tool = _normalize_tool(tool)
     if len(images) > MAX_BATCH_FILES:
         raise HTTPException(status_code=400, detail=f"Batch limit exceeded. Max {MAX_BATCH_FILES} files per batch.")
     files: list[tuple[str, bytes]] = []
+    metadatas: list[dict[str, object]] = []
+    total_bytes = 0
     for upload in images:
-        raw, _ = await _read_validated_upload(upload)
+        raw, metadata = await _read_validated_upload(upload)
+        total_bytes += len(raw)
+        if total_bytes > MAX_BATCH_TOTAL_BYTES:
+            raise HTTPException(status_code=413, detail=f"Batch upload exceeds {MAX_BATCH_TOTAL_MB} MB total.")
         files.append((upload.filename or "image.png", raw))
+        metadatas.append(metadata)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    if tool == "remove-background":
+    if normalized_tool == "remove-background":
         settings = vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format=output_format))
-    elif tool == "remove-background-upscale":
-        settings = {"background": vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format="png")), "upscale": vars(UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height))}
+    elif normalized_tool == "remove-background-upscale":
+        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height)
+        try:
+            for metadata in metadatas:
+                _validate_upscale_resolution(metadata, upscale_options)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        settings = {"background": vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format="png")), "upscale": vars(upscale_options)}
     else:
-        settings = vars(UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height))
-    batch = create_batch(files, tool, settings)
+        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height)
+        try:
+            for metadata in metadatas:
+                _validate_upscale_resolution(metadata, upscale_options)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        settings = vars(upscale_options)
+    batch = create_batch(files, normalized_tool, settings)
     return {"batch": batch}
 
 
@@ -207,6 +240,16 @@ def api_result(job_id: str) -> FileResponse:
     return FileResponse(path, filename=str(job.get("filename") or path.name))
 
 
+@app.get("/api/sources/{job_id}")
+def api_source(job_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> FileResponse:
+    _require_api_key(x_api_key, authorization)
+    path = source_path(job_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Source image not found for this job.")
+    job = get_job(job_id) or {}
+    return FileResponse(path, filename=str(job.get("source_filename") or path.name))
+
+
 @app.get("/api/diagnostics")
 def api_diagnostics() -> dict[str, object]:
     runtime = _runtime_info()
@@ -218,6 +261,8 @@ def api_diagnostics() -> dict[str, object]:
             "max_upload_mb": MAX_UPLOAD_MB,
             "max_image_dimension": MAX_IMAGE_DIMENSION,
             "max_upscale_factor": MAX_UPSCALE_FACTOR,
+            "max_batch_files": MAX_BATCH_FILES,
+            "max_batch_total_mb": MAX_BATCH_TOTAL_MB,
         },
         "recommendations": _runtime_recommendations(runtime),
     }
@@ -229,6 +274,12 @@ def api_capabilities() -> dict[str, object]:
         "tools": list(SUPPORTED_TOOLS),
         "response_modes": list(SUPPORTED_RESPONSE_MODES),
         "output_formats": sorted(set(SUPPORTED_FORMATS) | set(SUPPORTED_BG_FORMATS)),
+        "batch": {
+            "max_files": MAX_BATCH_FILES,
+            "max_total_mb": MAX_BATCH_TOTAL_MB,
+            "zip_downloads": True,
+            "server_background_processing": True,
+        },
         "upscale": {
             "modes": ["auto", "photo", "general", "anime", "conservative"],
             "max_upscale_factor": MAX_UPSCALE_FACTOR,
@@ -266,14 +317,20 @@ def _filename_from_disposition(disposition: str | None) -> str | None:
 def _process_json_payload(request: Request, response: StreamingResponse, tool: str) -> dict[str, object]:
     headers = response.headers
     relative_download_url = headers.get("X-Download-URL")
+    relative_source_url = headers.get("X-Source-URL")
     absolute_download_url = None
+    absolute_source_url = None
     if relative_download_url:
         absolute_download_url = str(request.base_url).rstrip("/") + relative_download_url
+    if relative_source_url:
+        absolute_source_url = str(request.base_url).rstrip("/") + relative_source_url
     return {
         "job_id": headers.get("X-Job-Id"),
         "filename": _filename_from_disposition(headers.get("content-disposition")),
         "download_url": absolute_download_url,
         "relative_download_url": relative_download_url,
+        "source_url": absolute_source_url,
+        "relative_source_url": relative_source_url,
         "metadata": {
             "tool": tool,
             "output_width": headers.get("X-Output-Width"),
@@ -416,6 +473,7 @@ async def api_upscale(
         output_format=result.extension,
         engine=result.engine,
         settings=vars(options),
+        source_data=raw,
     )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -424,6 +482,7 @@ async def api_upscale(
         "X-Output-Height": str(result.height),
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
+        "X-Source-URL": str(job.get("source_download_url", "")),
     }
 
     return StreamingResponse(
@@ -537,6 +596,7 @@ async def api_remove_background_upscale(
             "background": vars(background_options),
             "upscale": vars(upscale_options),
         },
+        source_data=raw,
     )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -547,6 +607,7 @@ async def api_remove_background_upscale(
         "X-Output-Height": str(result.height),
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
+        "X-Source-URL": str(job.get("source_download_url", "")),
     }
 
     return StreamingResponse(
@@ -627,6 +688,7 @@ async def api_remove_background(
         output_format=result.extension,
         engine=result.engine,
         settings=vars(options),
+        source_data=raw,
     )
     headers = {
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -635,6 +697,7 @@ async def api_remove_background(
         "X-Output-Height": str(result.height),
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
+        "X-Source-URL": str(job.get("source_download_url", "")),
     }
 
     return StreamingResponse(

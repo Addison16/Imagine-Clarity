@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import sys
+import time
+import zipfile
 
 import requests
 from PIL import Image, ImageDraw
@@ -45,11 +47,16 @@ def main() -> int:
     assert response.headers["X-Upscaler-Engine"].startswith("Auto:"), response.headers["X-Upscaler-Engine"]
     assert response.headers["X-Job-Id"], response.headers
     assert response.headers["X-Download-URL"].startswith("/api/results/"), response.headers
+    assert response.headers["X-Source-URL"].startswith("/api/sources/"), response.headers
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (512, 384), out.size
     saved = requests.get(f"{base_url}{response.headers['X-Download-URL']}", timeout=10)
     saved.raise_for_status()
     assert len(saved.content) == len(response.content), (len(saved.content), len(response.content))
+    source = requests.get(f"{base_url}{response.headers['X-Source-URL']}", timeout=10)
+    source.raise_for_status()
+    source_img = Image.open(io.BytesIO(source.content))
+    assert source_img.size == (64, 48), source_img.size
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -178,6 +185,7 @@ def main() -> int:
     assert api_result["job_id"], api_result
     assert api_result["download_url"].startswith(base_url), api_result
     assert api_result["relative_download_url"].startswith("/api/results/"), api_result
+    assert api_result["relative_source_url"].startswith("/api/sources/"), api_result
     saved = requests.get(api_result["download_url"], timeout=10)
     saved.raise_for_status()
     out = Image.open(io.BytesIO(saved.content)).convert("RGBA")
@@ -217,6 +225,49 @@ def main() -> int:
     assert out.size == (180, 140), out.size
     assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
     assert out.getpixel((90, 70))[3] > 220, out.getpixel((90, 70))
+
+    batch_files = []
+    for idx, color in enumerate(("#2563eb", "#f97316"), start=1):
+        batch_img = Image.new("RGB", (32, 24), "#f8fafc")
+        batch_draw = ImageDraw.Draw(batch_img)
+        batch_draw.rectangle((5, 5, 27, 19), fill=color)
+        buffer = io.BytesIO()
+        batch_img.save(buffer, format="PNG")
+        batch_files.append(("images", (f"batch-{idx}.png", buffer.getvalue(), "image/png")))
+
+    response = requests.post(
+        f"{base_url}/api/batches",
+        files=batch_files,
+        data={
+            "tool": "upscale",
+            "scale": "2",
+            "mode": "conservative",
+            "device": "cpu",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    batch = response.json()["batch"]
+    assert batch["id"], batch
+    assert batch["zip_url"].startswith("/api/batches/"), batch
+    assert "source_path" not in batch["items"][0], batch
+    for _ in range(30):
+        poll = requests.get(f"{base_url}/api/batches/{batch['id']}", timeout=10)
+        poll.raise_for_status()
+        batch = poll.json()
+        if batch["status"] == "completed":
+            break
+        time.sleep(1)
+    assert batch["completed"] == 2 and batch["failed"] == 0, batch
+    assert batch["items"][0]["source_url"].startswith("/api/batches/"), batch
+    source = requests.get(f"{base_url}{batch['items'][0]['source_url']}", timeout=10)
+    source.raise_for_status()
+    assert Image.open(io.BytesIO(source.content)).size == (32, 24)
+    zipped = requests.get(f"{base_url}{batch['zip_url']}", timeout=10)
+    zipped.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(zipped.content)) as archive:
+        assert len(archive.namelist()) == 2, archive.namelist()
 
     buffer = io.BytesIO()
     logo.save(buffer, format="PNG")
