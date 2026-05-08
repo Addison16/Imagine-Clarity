@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clarity Image Tools</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260507b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260507d" />
   </head>
   <body>
     <main class="page-shell">
@@ -13,7 +13,7 @@
           <div class="brand-mark" aria-hidden="true">CI</div>
           <div>
             <h1>Clarity Image Tools</h1>
-            <p class="subtitle">Upscale, enhance, remove backgrounds, and run server-side batches. <strong>Build 2026.05.07b</strong></p>
+            <p class="subtitle">Upscale, enhance, remove backgrounds, and inspect results with compare tools. <strong>Build 2026.05.07d</strong></p>
           </div>
         </div>
         <div class="header-actions">
@@ -438,7 +438,7 @@
         <article class="card preview-card result-card">
           <header class="preview-header">
             <div>
-              <h2 id="result-title">Result</h2>
+              <h2 id="result-title">Compare & Result</h2>
               <p id="after-meta">No result yet</p>
             </div>
             <span id="engine-chip" class="mini-badge hidden">Engine</span>
@@ -455,10 +455,15 @@
           <div class="preview-stage">
             <img id="after" alt="Processed result preview" />
 
-            <div id="compare-stage" class="compare-stage hidden" style="--compare: 50%">
-              <img id="compare-before" class="compare-img compare-before" alt="Original comparison preview" />
-              <div id="compare-after-wrap" class="compare-after-wrap">
-                <img id="compare-after" class="compare-img compare-after" alt="Processed comparison preview" />
+            <div id="compare-stage" class="compare-stage hidden" data-mode="slider" data-zoom="fit" style="--compare: 50%">
+              <div id="compare-content" class="compare-content">
+                <div class="compare-pane compare-pane-before">
+                  <img id="compare-before" class="compare-img compare-before" alt="Original comparison preview" />
+                </div>
+                <div id="compare-after-wrap" class="compare-after-wrap compare-pane compare-pane-after">
+                  <img id="compare-after" class="compare-img compare-after" alt="Processed comparison preview" />
+                </div>
+                <canvas id="compare-difference" class="compare-difference" aria-label="Difference preview"></canvas>
               </div>
               <span class="compare-tag compare-tag-before">Original</span>
               <span class="compare-tag compare-tag-after">Result</span>
@@ -489,10 +494,31 @@
             </div>
             <div class="result-buttons">
               <a id="result-download" class="secondary-button" download>Download Image</a>
-              <button id="compare-toggle" class="secondary-button" type="button">Compare</button>
+              <button id="compare-toggle" class="secondary-button" type="button">Show Compare</button>
               <button id="process-another" class="ghost-button" type="button">Process Another</button>
             </div>
           </footer>
+          <div id="compare-controls" class="compare-controls hidden" aria-label="Comparison controls">
+            <label class="compare-select">
+              <span>View</span>
+              <select id="compare-mode-select" aria-label="Comparison view">
+                <option value="slider" selected>Slider</option>
+                <option value="side-by-side">Side by Side</option>
+                <option value="before">Original Only</option>
+                <option value="after">Result Only</option>
+                <option value="difference">Difference Preview</option>
+              </select>
+            </label>
+            <label class="compare-select">
+              <span>Zoom</span>
+              <select id="compare-zoom-select" aria-label="Comparison zoom">
+                <option value="fit" selected>Fit</option>
+                <option value="100">100%</option>
+                <option value="200">200%</option>
+              </select>
+            </label>
+            <p class="compare-help">Drag across the image in Slider view to inspect edges, texture, and lettering.</p>
+          </div>
         </article>
       </section>
 
@@ -530,6 +556,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260507b"></script>
+    <script src="/static/app.js?v=20260507d"></script>
   </body>
 </html>

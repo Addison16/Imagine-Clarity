@@ -54,9 +54,16 @@ const resultSummary = document.querySelector("#result-summary");
 const compareToggle = document.querySelector("#compare-toggle");
 const processAnother = document.querySelector("#process-another");
 const compareStage = document.querySelector("#compare-stage");
+const compareControls = document.querySelector("#compare-controls");
+const compareContent = document.querySelector("#compare-content");
 const compareBefore = document.querySelector("#compare-before");
 const compareAfter = document.querySelector("#compare-after");
+const compareDifference = document.querySelector("#compare-difference");
 const compareSlider = document.querySelector("#compare-slider");
+const compareTagBefore = document.querySelector(".compare-tag-before");
+const compareTagAfter = document.querySelector(".compare-tag-after");
+const compareModeSelect = document.querySelector("#compare-mode-select");
+const compareZoomSelect = document.querySelector("#compare-zoom-select");
 const targetWidthInput = document.querySelector("#target-width");
 const targetHeightInput = document.querySelector("#target-height");
 const targetPresetSelect = document.querySelector("#target-preset");
@@ -82,6 +89,11 @@ let maxBatchFiles = 100;
 let maxBatchTotalMb = 512;
 let selectedImageSize = null;
 let compareActive = false;
+let compareMode = "slider";
+let compareZoom = "fit";
+let compareNaturalSize = null;
+let differenceKey = "";
+let differenceToken = 0;
 let historyPreviewEnabled = true;
 let currentBatchId = null;
 
@@ -545,6 +557,16 @@ function imageSize(url) {
   });
 }
 
+function loadPreviewImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
 async function loadRuntime() {
   try {
     const response = await fetch("/health", { cache: "no-store" });
@@ -619,13 +641,12 @@ async function setFile(file) {
   revoke(afterUrl);
   beforeUrl = URL.createObjectURL(file);
   afterUrl = null;
-  compareActive = false;
+  closeCompare();
 
   beforeImg.src = beforeUrl;
   beforeEmpty.classList.add("hidden");
   afterImg.removeAttribute("src");
   afterEmpty.classList.remove("hidden");
-  compareStage.classList.add("hidden");
   resultActions.classList.add("hidden");
   engineChip.classList.add("hidden");
 
@@ -728,13 +749,7 @@ function syncToolUi() {
   outputFormat.value = "png";
 
   syncRunLabel();
-  if (tool === "remove-background") {
-    resultTitle.textContent = "Transparent Result";
-  } else if (tool === "remove-background-upscale") {
-    resultTitle.textContent = "Transparent Enhanced Result";
-  } else {
-    resultTitle.textContent = "Enhanced Result";
-  }
+  resultTitle.textContent = "Compare & Result";
   if (!afterUrl) {
     afterMeta.textContent = "No result yet";
   } else {
@@ -748,14 +763,12 @@ function syncToolUi() {
 function clearResultOnly() {
   revoke(afterUrl);
   afterUrl = null;
-  compareActive = false;
   afterImg.removeAttribute("src");
-  compareStage.classList.add("hidden");
+  closeCompare();
   afterEmpty.classList.remove("hidden");
   afterMeta.textContent = "No result yet";
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
-  compareToggle.textContent = "Compare";
 }
 
 function clearWorkspace() {
@@ -766,11 +779,10 @@ function clearWorkspace() {
   revoke(afterUrl);
   beforeUrl = null;
   afterUrl = null;
-  compareActive = false;
   fileInput.value = "";
   beforeImg.removeAttribute("src");
   afterImg.removeAttribute("src");
-  compareStage.classList.add("hidden");
+  closeCompare();
   beforeEmpty.classList.remove("hidden");
   afterEmpty.classList.remove("hidden");
   beforeMeta.textContent = "No image selected";
@@ -783,7 +795,6 @@ function clearWorkspace() {
   batchResults.classList.add("hidden");
   batchResults.replaceChildren();
   runButton.disabled = true;
-  compareToggle.textContent = "Compare";
   setStep(0);
   setStatus("Ready", "ready", "Ready for an image.");
 }
@@ -833,18 +844,149 @@ function setComparePosition(value) {
   compareStage.style.setProperty("--compare", `${value}%`);
 }
 
-function toggleCompare() {
+function resetCompareDefaults() {
+  compareMode = "slider";
+  compareZoom = "fit";
+  compareSlider.value = "50";
+  setComparePosition(50);
+  applyCompareMode("slider");
+  applyCompareZoom("fit");
+}
+
+function closeCompare() {
+  compareActive = false;
+  compareStage.classList.add("hidden");
+  compareControls.classList.add("hidden");
+  compareToggle.textContent = "Show Compare";
+  updateCompareAvailability();
+}
+
+function updateCompareAvailability() {
+  const canCompare = Boolean(beforeUrl && afterUrl);
+  compareToggle.disabled = !canCompare;
+  compareToggle.setAttribute("aria-disabled", canCompare ? "false" : "true");
+  compareToggle.title = canCompare ? "Show slider comparison" : "Comparison needs both the original image and a result.";
+}
+
+async function refreshCompareSizing() {
+  if (!afterUrl) return;
+  try {
+    const size = await imageSize(afterUrl);
+    compareNaturalSize = size;
+    applyCompareZoom(compareZoom);
+  } catch {
+    compareNaturalSize = null;
+  }
+}
+
+function applyCompareZoom(value = compareZoom) {
+  compareZoom = value;
+  compareStage.dataset.zoom = value;
+  compareZoomSelect.value = value;
+
+  if (!compareNaturalSize || value === "fit") {
+    compareContent.style.removeProperty("width");
+    compareContent.style.removeProperty("height");
+    return;
+  }
+
+  const multiplier = value === "200" ? 2 : 1;
+  const paneMultiplier = compareMode === "side-by-side" ? 2 : 1;
+  compareContent.style.width = `${Math.max(1, Math.round(compareNaturalSize.width * multiplier * paneMultiplier))}px`;
+  compareContent.style.height = `${Math.max(1, Math.round(compareNaturalSize.height * multiplier))}px`;
+}
+
+async function renderDifferencePreview() {
   if (!beforeUrl || !afterUrl) return;
-  compareActive = !compareActive;
+  const key = `${beforeUrl}|${afterUrl}`;
+  if (differenceKey === key && compareDifference.width > 0) return;
+  const token = differenceToken + 1;
+  differenceToken = token;
+  try {
+    const [beforeImage, afterImage] = await Promise.all([
+      loadPreviewImage(beforeUrl),
+      loadPreviewImage(afterUrl),
+    ]);
+    if (token !== differenceToken) return;
+
+    const maxPreviewSide = 1600;
+    const ratio = Math.min(
+      1,
+      maxPreviewSide / Math.max(afterImage.naturalWidth || 1, afterImage.naturalHeight || 1),
+    );
+    const width = Math.max(1, Math.round((afterImage.naturalWidth || beforeImage.naturalWidth || 1) * ratio));
+    const height = Math.max(1, Math.round((afterImage.naturalHeight || beforeImage.naturalHeight || 1) * ratio));
+    compareDifference.width = width;
+    compareDifference.height = height;
+
+    const ctx = compareDifference.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(beforeImage, 0, 0, width, height);
+    const beforeData = ctx.getImageData(0, 0, width, height);
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(afterImage, 0, 0, width, height);
+    const afterData = ctx.getImageData(0, 0, width, height);
+    const pixels = afterData.data;
+    const beforePixels = beforeData.data;
+    for (let index = 0; index < pixels.length; index += 4) {
+      const red = Math.abs(pixels[index] - beforePixels[index]);
+      const green = Math.abs(pixels[index + 1] - beforePixels[index + 1]);
+      const blue = Math.abs(pixels[index + 2] - beforePixels[index + 2]);
+      const alpha = Math.abs(pixels[index + 3] - beforePixels[index + 3]);
+      pixels[index] = Math.min(255, red * 3 + alpha);
+      pixels[index + 1] = Math.min(255, green * 3 + alpha);
+      pixels[index + 2] = Math.min(255, blue * 3 + alpha);
+      pixels[index + 3] = 255;
+    }
+    ctx.putImageData(afterData, 0, 0);
+    differenceKey = key;
+  } catch {
+    compareDifference.width = 1;
+    compareDifference.height = 1;
+  }
+}
+
+function applyCompareMode(value = compareMode) {
+  compareMode = beforeUrl ? value : value === "before" || value === "difference" ? "after" : value;
+  compareStage.dataset.mode = compareMode;
+  compareModeSelect.value = compareMode;
+  Array.from(compareModeSelect.options).forEach((option) => {
+    option.disabled = !beforeUrl && (option.value === "before" || option.value === "difference");
+  });
+  compareTagBefore.textContent = compareMode === "difference" ? "Difference" : "Original";
+  compareTagAfter.textContent = "Result";
+  applyCompareZoom(compareZoom);
+  if (compareActive && compareMode === "difference") {
+    renderDifferencePreview();
+  }
+}
+
+function openCompare({ mode = compareMode } = {}) {
+  updateCompareAvailability();
+  if (!beforeUrl || !afterUrl) return;
+  compareActive = true;
+  compareBefore.src = beforeUrl;
+  compareAfter.src = afterUrl;
+  setComparePosition(compareSlider.value);
+  applyCompareMode(mode);
+  applyCompareZoom(compareZoom);
+  refreshCompareSizing();
+  compareStage.classList.remove("hidden");
+  compareControls.classList.remove("hidden");
+  compareToggle.textContent = "Hide Compare";
+  compareToggle.title = "Hide comparison view";
+}
+
+function toggleCompare() {
   if (compareActive) {
-    compareBefore.src = beforeUrl;
-    compareAfter.src = afterUrl;
-    setComparePosition(compareSlider.value);
-    compareStage.classList.remove("hidden");
-    compareToggle.textContent = "Exit Compare";
+    closeCompare();
   } else {
-    compareStage.classList.add("hidden");
-    compareToggle.textContent = "Compare";
+    openCompare({ mode: compareMode });
   }
 }
 
@@ -887,12 +1029,15 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   resultDownload.textContent = "Download Image";
   resultActions.classList.remove("hidden");
   engineChip.classList.add("hidden");
-  compareActive = false;
-  compareStage.classList.add("hidden");
-  compareToggle.textContent = "Compare";
+  differenceKey = "";
+  resetCompareDefaults();
+  if (beforeUrl) {
+    openCompare({ mode: "slider" });
+  } else {
+    closeCompare();
+  }
   setStep(2);
   setStatus("Ready", "ready", `Previewing ${filename || "saved result"}.`);
-  if (compare && beforeUrl) toggleCompare();
 }
 
 function batchToResults(batch) {
@@ -998,6 +1143,7 @@ function renderBatchResults(results, batch = null) {
         preview.className = "small-button";
         preview.type = "button";
         preview.textContent = "Preview";
+        preview.setAttribute("aria-label", `Preview ${result.filename || result.name || "batch result"}`);
         preview.addEventListener("click", () => openStoredPreview({
           sourceUrl: result.sourceUrl,
           resultUrl: result.downloadUrl,
@@ -1010,6 +1156,7 @@ function renderBatchResults(results, batch = null) {
           compare.className = "small-button";
           compare.type = "button";
           compare.textContent = "Compare";
+          compare.setAttribute("aria-label", `Compare ${result.filename || result.name || "batch result"}`);
           compare.addEventListener("click", () => openStoredPreview({
             sourceUrl: result.sourceUrl,
             resultUrl: result.downloadUrl,
@@ -1149,6 +1296,7 @@ function renderHistory(jobs, batches = []) {
       previewButton.className = "small-button";
       previewButton.type = "button";
       previewButton.textContent = "Preview";
+      previewButton.setAttribute("aria-label", `Preview ${job.filename || job.source_filename || "processed image"}`);
       previewButton.addEventListener("click", () => openStoredPreview({
         sourceUrl: job.source_download_url,
         resultUrl: job.download_url,
@@ -1161,6 +1309,7 @@ function renderHistory(jobs, batches = []) {
         compareButton.className = "small-button";
         compareButton.type = "button";
         compareButton.textContent = "Compare";
+        compareButton.setAttribute("aria-label", `Compare ${job.filename || job.source_filename || "processed image"}`);
         compareButton.addEventListener("click", () => openStoredPreview({
           sourceUrl: job.source_download_url,
           resultUrl: job.download_url,
@@ -1387,6 +1536,14 @@ cutModeInputs.forEach((input) => input.addEventListener("change", applyCutPreset
 processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
 compareSlider.addEventListener("input", () => setComparePosition(compareSlider.value));
+compareModeSelect.addEventListener("change", () => {
+  applyCompareMode(compareModeSelect.value);
+  if (!compareActive) openCompare({ mode: compareModeSelect.value });
+});
+compareZoomSelect.addEventListener("change", () => {
+  applyCompareZoom(compareZoomSelect.value);
+  if (!compareActive) openCompare({ mode: compareMode });
+});
 refreshHistory.addEventListener("click", loadHistory);
 clearHistory.addEventListener("click", clearSavedJobs);
 toggleHistoryPreview.addEventListener("click", () => {
@@ -1477,6 +1634,8 @@ function showResult(blob, response, fallbackName) {
   afterUrl = URL.createObjectURL(blob);
   afterImg.src = afterUrl;
   afterEmpty.classList.add("hidden");
+  differenceKey = "";
+  updateCompareAvailability();
 
   const width = response.headers.get("X-Output-Width");
   const height = response.headers.get("X-Output-Height");
@@ -1502,6 +1661,8 @@ function showResult(blob, response, fallbackName) {
   resultDownload.download = filename;
   resultDownload.textContent = `Download ${extension}`;
   resultActions.classList.remove("hidden");
+  resetCompareDefaults();
+  if (beforeUrl) openCompare({ mode: "slider" });
   return {
     width,
     height,
@@ -1532,10 +1693,8 @@ form.addEventListener("submit", async (event) => {
   runButton.disabled = true;
   resultActions.classList.add("hidden");
   afterEmpty.classList.add("hidden");
-  compareStage.classList.add("hidden");
   engineChip.classList.add("hidden");
-  compareActive = false;
-  compareToggle.textContent = "Compare";
+  closeCompare();
   setStep(2);
 
   const tool = selectedTool();
@@ -1656,6 +1815,9 @@ updateFringeCleanupValue();
 updateBgToleranceValue();
 updateInnerCleanupValue();
 setComparePosition(compareSlider.value);
+applyCompareMode("slider");
+applyCompareZoom("fit");
+updateCompareAvailability();
 setPreviewBackground("checker");
 syncSizingUi();
 syncToolUi();

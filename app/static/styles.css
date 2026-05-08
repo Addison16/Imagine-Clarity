@@ -726,8 +726,8 @@ input[type="number"]:focus {
 }
 
 .primary-button:not(:disabled):hover,
-.secondary-button:hover,
-.ghost-button:hover {
+.secondary-button:not(:disabled):hover,
+.ghost-button:not(:disabled):hover {
   transform: translateY(-1px);
 }
 
@@ -735,7 +735,9 @@ input[type="number"]:focus {
   background: var(--accent-hover);
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.secondary-button:disabled,
+.small-button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -746,7 +748,7 @@ input[type="number"]:focus {
   color: var(--accent-hover);
 }
 
-.secondary-button:hover {
+.secondary-button:not(:disabled):hover {
   border-color: var(--accent);
 }
 
@@ -1019,28 +1021,101 @@ input[type="number"]:focus {
   justify-content: flex-end;
 }
 
+.compare-controls {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.compare-select {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 132px;
+}
+
+.compare-select span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.compare-select select {
+  min-height: 38px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 34px 0 10px;
+}
+
+.compare-help {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+}
+
 .compare-stage {
   position: absolute;
   inset: 0;
   z-index: 2;
+  overflow: auto;
   background: #f8fafc;
 }
 
-.compare-img,
-.compare-after-wrap {
+.compare-stage[data-zoom="fit"] {
+  overflow: hidden;
+}
+
+.compare-content {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 100%;
+  min-height: 100%;
+  background: inherit;
+}
+
+.compare-stage[data-zoom="100"] .compare-content,
+.compare-stage[data-zoom="200"] .compare-content {
+  position: relative;
+  inset: auto;
+}
+
+.compare-pane,
+.compare-after-wrap,
+.compare-difference {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
 }
 
-.compare-img {
+.compare-pane {
+  overflow: hidden;
+}
+
+.compare-img,
+.compare-difference {
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
 .compare-after-wrap {
-  overflow: hidden;
-  width: var(--compare);
+  clip-path: inset(0 calc(100% - var(--compare)) 0 0);
 }
 
 .compare-handle {
@@ -1100,6 +1175,64 @@ input[type="number"]:focus {
 
 .compare-tag-after {
   right: 12px;
+}
+
+.compare-stage[data-mode="side-by-side"] .compare-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1px;
+}
+
+.compare-stage[data-mode="side-by-side"] .compare-pane {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+}
+
+.compare-stage[data-mode="side-by-side"] .compare-after-wrap {
+  clip-path: none;
+}
+
+.compare-stage[data-mode="side-by-side"] .compare-handle,
+.compare-stage[data-mode="side-by-side"] .compare-slider,
+.compare-stage[data-mode="before"] .compare-handle,
+.compare-stage[data-mode="before"] .compare-slider,
+.compare-stage[data-mode="after"] .compare-handle,
+.compare-stage[data-mode="after"] .compare-slider,
+.compare-stage[data-mode="difference"] .compare-handle,
+.compare-stage[data-mode="difference"] .compare-slider {
+  display: none;
+}
+
+.compare-stage[data-mode="before"] .compare-pane-before,
+.compare-stage[data-mode="after"] .compare-pane-after {
+  clip-path: none;
+  z-index: 1;
+}
+
+.compare-stage[data-mode="before"] .compare-pane-after,
+.compare-stage[data-mode="after"] .compare-pane-before,
+.compare-stage[data-mode="difference"] .compare-pane {
+  display: none;
+}
+
+.compare-difference {
+  display: none;
+  background: #ffffff;
+}
+
+.compare-stage[data-mode="difference"] .compare-difference {
+  display: block;
+}
+
+.compare-stage[data-mode="after"] .compare-tag-before,
+.compare-stage[data-mode="before"] .compare-tag-after,
+.compare-stage[data-mode="difference"] .compare-tag-after {
+  display: none;
+}
+
+.compare-stage[data-mode="difference"] .compare-tag-before {
+  left: 12px;
 }
 
 .hidden {
@@ -1416,5 +1549,17 @@ input[type="number"]:focus {
   .secondary-button,
   .ghost-button {
     width: 100%;
+  }
+
+  .compare-controls {
+    justify-content: stretch;
+  }
+
+  .compare-select {
+    flex: 1 1 100%;
+  }
+
+  .compare-help {
+    text-align: left;
   }
 }

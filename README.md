@@ -82,6 +82,7 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 - `Batch processing`: select multiple images and the server runs them in the background one at a time. Closing the browser does not cancel the queued batch.
 - `Batch ZIP downloads`: completed batch outputs can be downloaded together as one ZIP file, with per-image result links still available.
+- `Comparison tools`: results open in the slider comparison view by default, with side-by-side, original-only, result-only, difference preview, fit, 100%, and 200% zoom views available from compact dropdowns.
 - `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download, preview, and before/after comparison when a source preview is available. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
 - `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
 - `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
