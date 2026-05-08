@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clarity Image Tools</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260507a" />
   </head>
   <body>
     <main class="page-shell">
@@ -13,7 +13,7 @@
           <div class="brand-mark" aria-hidden="true">CI</div>
           <div>
             <h1>Clarity Image Tools</h1>
-            <p class="subtitle">Upscale, enhance, or remove backgrounds from your images.</p>
+            <p class="subtitle">Upscale, enhance, or remove backgrounds from your images. <strong>Build 2026.05.07a</strong></p>
           </div>
         </div>
         <div class="header-actions">
@@ -133,6 +133,50 @@
 
               <div class="field hidden" data-size-panel="target">
                 <span class="label">Target resolution</span>
+                <label>
+                  <span>Preset targets (Gelato)</span>
+                  <select id="target-preset">
+                    <option value="">Custom size</option>
+                    <optgroup label="T-Shirts (Most products)">
+                      <option value="4500x5400">Standard Front/Back — 4500 x 5400</option>
+                      <option value="4200x4800">Youth / compact print — 4200 x 4800</option>
+                      <option value="1800x2400">Left chest / pocket — 1800 x 2400</option>
+                    </optgroup>
+                    <optgroup label="Hoodies & Sweatshirts">
+                      <option value="4500x5100">Center chest — 4500 x 5100</option>
+                      <option value="4800x5400">Large front / back — 4800 x 5400</option>
+                      <option value="1500x4200">Sleeve print — 1500 x 4200</option>
+                    </optgroup>
+                    <optgroup label="Posters & Art Prints">
+                      <option value="5400x7200">18x24 @ 300 DPI — 5400 x 7200</option>
+                      <option value="7200x10800">24x36 @ 300 DPI — 7200 x 10800</option>
+                      <option value="3600x4800">12x16 @ 300 DPI — 3600 x 4800</option>
+                    </optgroup>
+                    <optgroup label="Mugs & Accessories">
+                      <option value="2700x1120">11oz mug wrap — 2700 x 1120</option>
+                      <option value="3000x1400">15oz mug wrap — 3000 x 1400</option>
+                      <option value="3000x3000">Sticker / square accessory — 3000 x 3000</option>
+                    </optgroup>
+                    <optgroup label="Printify (Popular)">
+                      <option value="4500x5400">Unisex tee (DTG) — 4500 x 5400</option>
+                      <option value="4200x4800">Youth tee — 4200 x 4800</option>
+                      <option value="1800x2400">Left chest print — 1800 x 2400</option>
+                      <option value="2400x3000">Phone case artwork — 2400 x 3000</option>
+                      <option value="3000x3000">Tote / square assets — 3000 x 3000</option>
+                    </optgroup>
+                    <optgroup label="Redbubble (Popular)">
+                      <option value="7632x6480">Classic tee print area — 7632 x 6480</option>
+                      <option value="2875x3900">Sticker medium/high quality — 2875 x 3900</option>
+                      <option value="2800x2800">Square stickers/coasters — 2800 x 2800</option>
+                      <option value="4200x5100">Hoodie / sweatshirt center — 4200 x 5100</option>
+                    </optgroup>
+                    <optgroup label="TeePublic / Merch by Amazon Style">
+                      <option value="4500x5400">Standard apparel upload — 4500 x 5400</option>
+                      <option value="5400x8100">Long shirt / oversized print — 5400 x 8100</option>
+                      <option value="1800x2700">Pocket / badge artwork — 1800 x 2700</option>
+                    </optgroup>
+                  </select>
+                </label>
                 <div class="target-grid">
                   <label>
                     <span>Width</span>
@@ -460,6 +504,7 @@
               <p>Recent outputs are saved in Docker storage.</p>
             </div>
             <div class="utility-actions">
+              <button id="toggle-history-preview" class="small-button" type="button">Preview: On</button>
               <button id="refresh-history" class="small-button" type="button">Refresh</button>
               <button id="clear-history" class="small-button danger-button" type="button">Clear Recent</button>
             </div>
@@ -485,6 +530,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260507a"></script>
   </body>
 </html>

@@ -59,12 +59,14 @@ const compareAfter = document.querySelector("#compare-after");
 const compareSlider = document.querySelector("#compare-slider");
 const targetWidthInput = document.querySelector("#target-width");
 const targetHeightInput = document.querySelector("#target-height");
+const targetPresetSelect = document.querySelector("#target-preset");
 const previewBgButtons = document.querySelectorAll("[data-preview-bg]");
 const previewStages = document.querySelectorAll(".preview-stage");
 const historyList = document.querySelector("#history-list");
 const batchResults = document.querySelector("#batch-results");
 const refreshHistory = document.querySelector("#refresh-history");
 const clearHistory = document.querySelector("#clear-history");
+const toggleHistoryPreview = document.querySelector("#toggle-history-preview");
 const diagnosticsPanel = document.querySelector("#diagnostics-panel");
 const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
 
@@ -78,6 +80,8 @@ let maxImageDimension = 16384;
 let maxUpscaleFactor = 8;
 let selectedImageSize = null;
 let compareActive = false;
+let historyPreviewEnabled = true;
+let currentBatchId = null;
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
   value: option.value,
@@ -662,9 +666,24 @@ function syncSizingUi(forceDefaults = false) {
     panel.classList.toggle("hidden", panel.dataset.sizePanel !== mode);
   });
   if (mode === "target") fillTargetDefaults(forceDefaults);
+  if (mode !== "target" && targetPresetSelect) targetPresetSelect.value = "";
   if (selectedFile) {
     clearResultOnly();
     validateResolutionForCurrentSettings("Sizing updated. Start when ready.");
+  }
+}
+
+function applyTargetPreset(value) {
+  if (!value) return;
+  const [w, h] = String(value).split("x").map((n) => Number.parseInt(n, 10));
+  if (!Number.isFinite(w) || !Number.isFinite(h)) return;
+  setRadioValue("sizing", "target");
+  syncSizingUi(false);
+  targetWidthInput.value = String(w);
+  targetHeightInput.value = String(h);
+  if (selectedFile) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings(`Target preset selected: ${w} x ${h}`);
   }
 }
 
@@ -828,6 +847,22 @@ function renderBatchResults(results) {
     return;
   }
   batchResults.classList.remove("hidden");
+  if (currentBatchId) {
+    const actions = document.createElement("div");
+    actions.className = "job-actions";
+    const retryFailed = document.createElement("button");
+    retryFailed.className = "small-button";
+    retryFailed.type = "button";
+    retryFailed.textContent = "Retry Failed";
+    retryFailed.addEventListener("click", () => retryBatch(currentBatchId, true).catch((error) => setStatus("Error", "error", error.message || "Retry failed.")));
+    const rerunAll = document.createElement("button");
+    rerunAll.className = "small-button";
+    rerunAll.type = "button";
+    rerunAll.textContent = "Run Again";
+    rerunAll.addEventListener("click", () => retryBatch(currentBatchId, false).catch((error) => setStatus("Error", "error", error.message || "Rerun failed.")));
+    actions.append(retryFailed, rerunAll);
+    batchResults.append(actions);
+  }
   results.forEach((result) => {
     const row = document.createElement("div");
     row.className = `batch-row ${result.ok ? "" : "error"}`.trim();
@@ -847,6 +882,33 @@ function renderBatchResults(results) {
     }
     batchResults.append(row);
   });
+}
+
+async function retryBatch(batchId, failedOnly = true) {
+  const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}/retry?failed_only=${failedOnly ? "true" : "false"}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || "Could not queue retry batch.");
+  }
+  const batch = (await response.json()).batch;
+  currentBatchId = batch.id;
+  setStatus("Processing", "busy", failedOnly ? "Retrying failed items in background." : "Re-running batch in background.");
+  const completed = await pollBatch(batch.id);
+  const batchItems = completed.items || [];
+  renderBatchResults(
+    batchItems.map((item) => ({
+      ok: item.status === "done",
+      name: item.filename,
+      summary: item.result_filename || "Done",
+      error: item.error || "Failed",
+      downloadUrl: item.result_download_url || "#",
+      filename: item.result_filename || item.filename,
+    })),
+  );
+  await loadHistory();
+  await loadDiagnostics();
 }
 
 function renderHistory(jobs) {
@@ -875,6 +937,20 @@ function renderHistory(jobs) {
     link.textContent = "Download";
     const actions = document.createElement("div");
     actions.className = "job-actions";
+    if (historyPreviewEnabled) {
+      const previewButton = document.createElement("button");
+      previewButton.className = "small-button";
+      previewButton.type = "button";
+      previewButton.textContent = "Preview";
+      previewButton.addEventListener("click", () => {
+        afterImg.src = job.download_url;
+        afterEmpty.classList.add("hidden");
+        resultActions.classList.add("hidden");
+        setStep(2);
+        setStatus("Ready", "ready", `Previewing saved job: ${job.filename || "result"}`);
+      });
+      actions.append(previewButton);
+    }
     const deleteButton = document.createElement("button");
     deleteButton.className = "small-button danger-button";
     deleteButton.type = "button";
@@ -894,6 +970,20 @@ async function loadHistory() {
     renderHistory(body.jobs || []);
   } catch {
     historyList.innerHTML = '<p class="muted-copy">Could not load saved jobs.</p>';
+  }
+}
+
+async function pollBatch(batchId) {
+  while (true) {
+    const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Batch status failed");
+    const batch = await response.json();
+    const done = batch.completed || 0;
+    const failed = batch.failed || 0;
+    const total = batch.total || 0;
+    setProgress(total ? Math.round(((done + failed) / total) * 100) : 0, `Batch progress: ${done + failed}/${total}`);
+    if (batch.status === "completed") return batch;
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 }
 
@@ -1011,12 +1101,16 @@ sizingInputs.forEach((input) => {
 
 [targetWidthInput, targetHeightInput].forEach((input) => {
   input.addEventListener("input", () => {
+    if (targetPresetSelect) targetPresetSelect.value = "";
     if (selectedFile) {
       clearResultOnly();
       validateResolutionForCurrentSettings("Target resolution updated. Start when ready.");
     }
   });
 });
+if (targetPresetSelect) {
+  targetPresetSelect.addEventListener("change", () => applyTargetPreset(targetPresetSelect.value));
+}
 
 infoTips.forEach((tip) => {
   tip.addEventListener("click", (event) => {
@@ -1071,6 +1165,11 @@ compareToggle.addEventListener("click", toggleCompare);
 compareSlider.addEventListener("input", () => setComparePosition(compareSlider.value));
 refreshHistory.addEventListener("click", loadHistory);
 clearHistory.addEventListener("click", clearSavedJobs);
+toggleHistoryPreview.addEventListener("click", () => {
+  historyPreviewEnabled = !historyPreviewEnabled;
+  toggleHistoryPreview.textContent = `Preview: ${historyPreviewEnabled ? "On" : "Off"}`;
+  loadHistory();
+});
 refreshDiagnostics.addEventListener("click", loadDiagnostics);
 
 previewBgButtons.forEach((button) => {
@@ -1102,7 +1201,7 @@ function buildPayload(file, size = selectedImageSize) {
   const tool = selectedTool();
   const payload = new FormData(form);
   payload.set("image", file);
-  payload.delete("tool");
+  payload.set("tool", tool);
   payload.delete("sizing");
   if (tool === "remove-background-upscale") {
     payload.set("upscale_device", upscaleDevice.value);
@@ -1222,6 +1321,47 @@ form.addEventListener("submit", async (event) => {
   try {
     const endpoint = endpointForTool(tool);
     const results = [];
+
+    if (filesToProcess.length > 1) {
+      const payload = buildPayload(filesToProcess[0], selectedImageSize);
+      payload.delete("image");
+      filesToProcess.forEach((file) => payload.append("images", file, file.name));
+      const batchResponse = await fetch("/api/batches", { method: "POST", body: payload });
+      if (!batchResponse.ok) {
+        const body = await batchResponse.json().catch(() => ({}));
+        throw new Error(body.detail || `Batch failed with ${batchResponse.status}`);
+      }
+      const batch = (await batchResponse.json()).batch;
+      setStatus("Processing", "busy", "Batch queued on server. You can close this browser and return later.");
+      const completed = await pollBatch(batch.id);
+      currentBatchId = batch.id;
+      const batchItems = completed.items || [];
+      const ok = batchItems.filter((item) => item.status === "done");
+      const failed = batchItems.filter((item) => item.status === "error");
+      renderBatchResults(
+        batchItems.map((item) => ({
+          ok: item.status === "done",
+          name: item.filename,
+          summary: item.result_filename || "Done",
+          error: item.error || "Failed",
+          downloadUrl: item.result_download_url || "#",
+          filename: item.result_filename || item.filename,
+        })),
+      );
+      if (ok[0]?.result_download_url) {
+        afterImg.src = ok[0].result_download_url;
+        afterEmpty.classList.add("hidden");
+      }
+      const zipLink = document.createElement("a");
+      zipLink.href = `/api/batches/${batch.id}/zip`;
+      zipLink.className = "secondary-button";
+      zipLink.textContent = "Download Batch ZIP";
+      batchResults.prepend(zipLink);
+      await loadHistory();
+      await loadDiagnostics();
+      setStatus("Complete", "complete", `Batch complete. ${ok.length} finished, ${failed.length} failed.`);
+      return;
+    }
 
     for (let index = 0; index < filesToProcess.length; index += 1) {
       const file = filesToProcess[index];
