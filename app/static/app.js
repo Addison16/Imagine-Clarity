@@ -10,6 +10,14 @@ const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
 const presetSelect = document.querySelector("#preset");
 const presetNote = document.querySelector("#preset-note");
+const presetCards = document.querySelectorAll("[data-preset-choice]");
+const experienceInputs = document.querySelectorAll('input[name="experience_mode"]');
+const experienceNote = document.querySelector("#experience-note");
+const recommendationCard = document.querySelector("#recommendation-card");
+const recommendationTitle = document.querySelector("#recommendation-title");
+const recommendationCopy = document.querySelector("#recommendation-copy");
+const useRecommendation = document.querySelector("#use-recommendation");
+const advancedWorkflowCard = document.querySelector("#advanced-workflow-card");
 const toolInputs = document.querySelectorAll('input[name="tool"]');
 const scaleInputs = document.querySelectorAll('input[name="scale"]');
 const sizingInputs = document.querySelectorAll('input[name="sizing"]');
@@ -282,6 +290,62 @@ const presets = {
   },
 };
 
+function selectedExperienceMode() {
+  return document.querySelector('input[name="experience_mode"]:checked')?.value || "beginner";
+}
+
+function setExperienceMode(mode = "beginner") {
+  setRadioValue("experience_mode", mode);
+  syncExperienceMode();
+}
+
+function syncExperienceMode() {
+  const mode = selectedExperienceMode();
+  const isPro = mode === "pro";
+  document.body.classList.toggle("pro-mode", isPro);
+  if (experienceNote) {
+    experienceNote.textContent = isPro
+      ? "Pro mode unlocks processing source, edge cleanup, canvas, DPI, and export tuning."
+      : "Beginner mode keeps the first workflow focused on upload, action, size, and export.";
+  }
+  if (!isPro) closeInfoTips();
+}
+
+function syncPresetCards() {
+  presetCards.forEach((card) => {
+    const active = card.dataset.presetChoice === presetSelect.value;
+    card.classList.toggle("active", active);
+    card.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function detectImageIntent(file, size) {
+  const name = (file?.name || "").toLowerCase();
+  const isLarge = size ? Math.max(size.width, size.height) >= 1800 : false;
+  const looksLikeGraphic =
+    name.includes("logo") ||
+    name.includes("sticker") ||
+    name.includes("shirt") ||
+    name.includes("graphic") ||
+    name.includes("transparent");
+  const looksLikeProduct = name.includes("product") || name.includes("mockup") || name.includes("item");
+  if (looksLikeProduct) return { type: "product photo", tool: "remove-background-upscale", output: isLarge ? "2x PNG" : "4x PNG" };
+  if (looksLikeGraphic) return { type: "logo or shirt graphic", tool: "remove-background-upscale", output: isLarge ? "2x PNG" : "4x PNG" };
+  return { type: "photo or artwork", tool: "upscale", output: isLarge ? "2x PNG" : "4x PNG" };
+}
+
+function showRecommendation(file, size) {
+  if (!recommendationCard || !file) return;
+  const intent = detectImageIntent(file, size);
+  recommendationTitle.textContent = `Detected: ${intent.type}`;
+  recommendationCopy.textContent = `Suggested: ${toolLabel(intent.tool)} | Output: ${intent.output} | Format: PNG`;
+  recommendationCard.classList.remove("hidden");
+}
+
+function hideRecommendation() {
+  recommendationCard?.classList.add("hidden");
+}
+
 function setStatus(message, state = "ready", detail = "") {
   statusEl.textContent = message;
   statusEl.className = `status-badge ${state}`.trim();
@@ -446,6 +510,7 @@ function applyPreset(key, fromUser = false) {
   updatePrintSizeNote();
   syncToolUi();
   syncSizingUi(key === "print");
+  syncPresetCards();
   presetNote.textContent = preset.note;
   if (selectedFile && fromUser) {
     clearResultOnly();
@@ -764,8 +829,10 @@ async function setFile(file) {
     beforeMeta.textContent = `${size.width} x ${size.height} | ${fileExtension(file)} | ${formatBytes(file.size)}`;
     fileMeta.textContent = `${size.width} x ${size.height} | ${formatBytes(file.size)}`;
     updatePrintSizeNote();
+    showRecommendation(file, size);
   } catch {
     beforeMeta.textContent = `${fileExtension(file)} | ${formatBytes(file.size)}`;
+    showRecommendation(file, null);
   }
 
   afterMeta.textContent = "No result yet";
@@ -927,6 +994,7 @@ function clearWorkspace() {
   resultActions.classList.add("hidden");
   batchResults.classList.add("hidden");
   batchResults.replaceChildren();
+  hideRecommendation();
   runButton.disabled = true;
   setStep(0);
   setStatus("Ready", "ready", "Ready for an image.");
@@ -1722,7 +1790,35 @@ async function loadDiagnostics() {
 
 fileInput.addEventListener("change", () => setFiles(fileInput.files));
 
-presetSelect.addEventListener("change", () => applyPreset(presetSelect.value, true));
+presetSelect.addEventListener("change", () => {
+  applyPreset(presetSelect.value, true);
+  syncPresetCards();
+});
+
+presetCards.forEach((card) => {
+  card.addEventListener("click", () => {
+    presetSelect.value = card.dataset.presetChoice || "smart";
+    applyPreset(presetSelect.value, true);
+    syncPresetCards();
+  });
+});
+
+experienceInputs.forEach((input) => input.addEventListener("change", syncExperienceMode));
+
+advancedWorkflowCard?.addEventListener("click", () => {
+  setExperienceMode("pro");
+  advancedWorkflowCard.classList.add("active");
+  window.setTimeout(() => advancedWorkflowCard.classList.remove("active"), 700);
+});
+
+useRecommendation?.addEventListener("click", () => {
+  if (!selectedFile) return;
+  presetSelect.value = "smart";
+  if (selectedImageSize) applySmartPresetForFile(selectedFile, selectedImageSize);
+  syncPresetCards();
+  syncToolUi();
+  setStatus("Ready", "ready", "Smart Auto settings applied. Start when ready.");
+});
 
 toolInputs.forEach((input) => input.addEventListener("change", syncToolUi));
 
@@ -2195,6 +2291,8 @@ applyCompareZoom("fit");
 updateCompareAvailability();
 setPreviewBackground("checker");
 setActiveView("workspace");
+syncExperienceMode();
+syncPresetCards();
 syncSizingUi();
 syncToolUi();
 loadRuntime();
