@@ -1085,7 +1085,7 @@ input[type="number"]:focus {
   inset: 0;
   z-index: 2;
   overflow: auto;
-  background: #f8fafc;
+  background: inherit;
 }
 
 .compare-stage[data-zoom="fit"] {
@@ -1119,6 +1119,7 @@ input[type="number"]:focus {
 
 .compare-pane {
   overflow: hidden;
+  background: inherit;
 }
 
 .compare-img,
@@ -1126,10 +1127,11 @@ input[type="number"]:focus {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  display: block;
 }
 
 .compare-after-wrap {
-  clip-path: inset(0 calc(100% - var(--compare)) 0 0);
+  clip-path: inset(0 0 0 var(--compare));
 }
 
 .compare-handle {
