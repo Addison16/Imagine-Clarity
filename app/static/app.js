@@ -90,6 +90,8 @@ const clearHistory = document.querySelector("#clear-history");
 const toggleHistoryPreview = document.querySelector("#toggle-history-preview");
 const diagnosticsPanel = document.querySelector("#diagnostics-panel");
 const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
+const viewTabs = document.querySelectorAll("[data-view-target]");
+const appViews = document.querySelectorAll(".app-view");
 
 let selectedFile = null;
 let selectedFiles = [];
@@ -284,6 +286,21 @@ function setStatus(message, state = "ready", detail = "") {
 function setRuntime(message, state = "neutral") {
   runtimeChip.textContent = message;
   runtimeChip.className = `runtime-badge ${state}`.trim();
+}
+
+function setActiveView(view) {
+  appViews.forEach((panel) => {
+    const active = panel.dataset.view === view;
+    panel.hidden = !active;
+    panel.classList.toggle("active", active);
+  });
+  viewTabs.forEach((tab) => {
+    const active = tab.dataset.viewTarget === view;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (view === "jobs") loadHistory();
+  if (view === "diagnostics") loadDiagnostics();
 }
 
 function closeInfoTips(exceptTip = null) {
@@ -1737,6 +1754,10 @@ toggleHistoryPreview.addEventListener("click", () => {
 });
 refreshDiagnostics.addEventListener("click", loadDiagnostics);
 
+viewTabs.forEach((tab) => {
+  tab.addEventListener("click", () => setActiveView(tab.dataset.viewTarget));
+});
+
 previewBgButtons.forEach((button) => {
   button.addEventListener("click", () => setPreviewBackground(button.dataset.previewBg));
 });
@@ -2023,8 +2044,7 @@ applyCompareMode("slider");
 applyCompareZoom("fit");
 updateCompareAvailability();
 setPreviewBackground("checker");
+setActiveView("workspace");
 syncSizingUi();
 syncToolUi();
 loadRuntime();
-loadHistory();
-loadDiagnostics();

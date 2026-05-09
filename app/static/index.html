@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clarity Image Tools</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260509a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260509b" />
   </head>
   <body>
     <main class="page-shell">
@@ -13,7 +13,7 @@
           <div class="brand-mark" aria-hidden="true">CI</div>
           <div>
             <h1>Clarity Image Tools</h1>
-            <p class="subtitle">Upscale, enhance, remove backgrounds, and prep clean print/web exports. <strong>Build 2026.05.09a</strong></p>
+            <p class="subtitle">Upload an image, choose a simple action, then compare and download the result. <strong>Build 2026.05.09b</strong></p>
           </div>
         </div>
         <div class="header-actions">
@@ -22,7 +22,19 @@
         </div>
       </header>
 
-      <section class="layout">
+      <nav class="view-nav" aria-label="Main sections">
+        <button class="view-tab active" type="button" data-view-target="workspace" aria-selected="true">Workbench</button>
+        <button class="view-tab" type="button" data-view-target="jobs" aria-selected="false">Saved Jobs</button>
+        <button class="view-tab" type="button" data-view-target="diagnostics" aria-selected="false">Diagnostics</button>
+      </nav>
+
+      <section id="workspace-view" class="app-view active" data-view="workspace">
+        <div class="view-intro">
+          <strong>Start here</strong>
+          <span>Drop one image or a batch, use Smart Auto for quick results, then open advanced controls only when needed.</span>
+        </div>
+
+        <div class="layout">
         <form id="controls" class="card sidebar">
           <ol class="steps" aria-label="Workflow">
             <li class="step active">Upload</li>
@@ -620,14 +632,15 @@
             <p class="compare-help">Drag across the image in Slider view to inspect edges, texture, and lettering.</p>
           </div>
         </article>
+        </div>
       </section>
 
-      <section class="utility-grid">
-        <article class="card utility-card">
+      <section id="jobs-view" class="app-view" data-view="jobs" hidden>
+        <article class="card utility-card utility-card-wide">
           <header class="utility-header">
             <div>
               <h2>Saved Jobs</h2>
-              <p>Recent outputs are saved in Docker storage.</p>
+              <p>Recent single-image and batch outputs are saved in Docker storage for preview, download, and cleanup.</p>
             </div>
             <div class="utility-actions">
               <button id="toggle-history-preview" class="small-button" type="button">Preview: On</button>
@@ -640,8 +653,10 @@
             <p class="muted-copy">No saved jobs loaded yet.</p>
           </div>
         </article>
+      </section>
 
-        <article class="card utility-card">
+      <section id="diagnostics-view" class="app-view" data-view="diagnostics" hidden>
+        <article class="card utility-card utility-card-wide">
           <header class="utility-header">
             <div>
               <h2>Runtime Diagnostics</h2>
@@ -656,6 +671,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260509a"></script>
+    <script src="/static/app.js?v=20260509b"></script>
   </body>
 </html>

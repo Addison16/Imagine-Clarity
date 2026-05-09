@@ -103,6 +103,65 @@ h1 {
   gap: 8px;
 }
 
+.view-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+}
+
+.view-tab {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.view-tab:hover,
+.view-tab:focus-visible,
+.view-tab.active {
+  background: #eef3ff;
+  color: var(--accent-hover);
+}
+
+.view-tab:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.app-view[hidden] {
+  display: none !important;
+}
+
+.view-intro {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.view-intro strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
 .status-badge,
 .runtime-badge,
 .mini-badge {
@@ -1266,6 +1325,10 @@ input[type="number"]:focus {
   padding: 16px;
 }
 
+.utility-card-wide {
+  max-width: 1120px;
+}
+
 .utility-header {
   display: flex;
   align-items: flex-start;
@@ -1495,6 +1558,19 @@ input[type="number"]:focus {
 
   .header-actions {
     justify-content: flex-start;
+  }
+
+  .view-nav {
+    width: 100%;
+  }
+
+  .view-tab {
+    flex: 1;
+  }
+
+  .view-intro {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .layout {
