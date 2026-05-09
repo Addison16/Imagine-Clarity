@@ -161,15 +161,26 @@ const innerCleanupDefaults = {
   strong: "50",
 };
 
+const shirtTarget = {
+  preset: "4500x5400",
+  width: "4500",
+  height: "5400",
+  fit: "pad",
+};
+
 const presets = {
   smart: {
-    note: "Smart Auto keeps model detection enabled and chooses safer defaults.",
+    note: "Smart Auto targets a standard 4500 x 5400 shirt canvas and chooses safer defaults.",
     tool: null,
     mode: "auto",
     model: "auto",
     cut: "balanced",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.55",
     edgeTrim: "1",
     fringeCleanup: "45",
@@ -187,7 +198,11 @@ const presets = {
     model: "logo",
     cut: "preserve",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.3",
     edgeTrim: "2",
     fringeCleanup: "70",
@@ -205,7 +220,11 @@ const presets = {
     model: "accurate",
     cut: "balanced",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.45",
     edgeTrim: "0",
     fringeCleanup: "0",
@@ -223,7 +242,11 @@ const presets = {
     model: "anime",
     cut: "balanced",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.35",
     edgeTrim: "1",
     fringeCleanup: "35",
@@ -241,7 +264,11 @@ const presets = {
     model: "accurate",
     cut: "balanced",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.5",
     edgeTrim: "1",
     fringeCleanup: "40",
@@ -253,13 +280,17 @@ const presets = {
     format: "png",
   },
   print: {
-    note: "Best when preparing a larger clean image for print or mockups.",
+    note: "Best when preparing a 4500 x 5400 shirt canvas for print or mockups.",
     tool: "upscale",
     mode: "auto",
     model: "auto",
     cut: "balanced",
     scale: "8",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.55",
     edgeTrim: "0",
     fringeCleanup: "0",
@@ -277,7 +308,11 @@ const presets = {
     model: "logo",
     cut: "preserve",
     scale: "4",
-    sizing: "scale",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
     denoise: "0.25",
     edgeTrim: "2",
     fringeCleanup: "70",
@@ -321,7 +356,6 @@ function syncPresetCards() {
 
 function detectImageIntent(file, size) {
   const name = (file?.name || "").toLowerCase();
-  const isLarge = size ? Math.max(size.width, size.height) >= 1800 : false;
   const looksLikeGraphic =
     name.includes("logo") ||
     name.includes("sticker") ||
@@ -329,9 +363,9 @@ function detectImageIntent(file, size) {
     name.includes("graphic") ||
     name.includes("transparent");
   const looksLikeProduct = name.includes("product") || name.includes("mockup") || name.includes("item");
-  if (looksLikeProduct) return { type: "product photo", tool: "remove-background-upscale", output: isLarge ? "2x PNG" : "4x PNG" };
-  if (looksLikeGraphic) return { type: "logo or shirt graphic", tool: "remove-background-upscale", output: isLarge ? "2x PNG" : "4x PNG" };
-  return { type: "photo or artwork", tool: "upscale", output: isLarge ? "2x PNG" : "4x PNG" };
+  if (looksLikeProduct) return { type: "product photo", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400" };
+  if (looksLikeGraphic) return { type: "logo or shirt graphic", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400" };
+  return { type: "photo or artwork", tool: "upscale", output: "Shirt PNG 4500 x 5400" };
 }
 
 function showRecommendation(file, size) {
@@ -474,6 +508,13 @@ function setCheckbox(id, checked) {
   if (input) input.checked = Boolean(checked);
 }
 
+function setShirtTargetDefaults() {
+  targetPresetSelect.value = shirtTarget.preset;
+  targetWidthInput.value = shirtTarget.width;
+  targetHeightInput.value = shirtTarget.height;
+  targetFitSelect.value = shirtTarget.fit;
+}
+
 function applyPreset(key, fromUser = false) {
   const preset = presets[key] || presets.smart;
   if (preset.tool) setRadioValue("tool", preset.tool);
@@ -489,7 +530,10 @@ function applyPreset(key, fromUser = false) {
   innerCleanup.value = preset.innerCleanup;
   outputFormat.value = preset.format;
   resizeMethodSelect.value = preset.resizeMethod || "lanczos";
-  targetFitSelect.value = preset.targetFit || "pad";
+  targetPresetSelect.value = preset.targetPreset || "";
+  targetWidthInput.value = preset.targetWidth || "";
+  targetHeightInput.value = preset.targetHeight || "";
+  targetFitSelect.value = preset.targetFit || shirtTarget.fit;
   sharpenAmount.value = preset.sharpenAmount || "70";
   dpiInput.value = preset.dpi || "300";
   exportQuality.value = preset.exportQuality || "95";
@@ -539,7 +583,8 @@ function applySmartPresetForFile(file, size) {
     setRadioValue("cut_mode", "balanced");
     applyCutPreset(false);
     setRadioValue("scale", isLarge ? "2" : "4");
-    setRadioValue("sizing", "scale");
+    setRadioValue("sizing", "target");
+    setShirtTargetDefaults();
     denoise.value = "0.45";
     edgeTrim.value = "2";
     fringeCleanup.value = "65";
@@ -554,13 +599,14 @@ function applySmartPresetForFile(file, size) {
     updateInnerCleanupValue();
     syncToolUi();
     syncSizingUi(false);
-    presetNote.textContent = "Smart Auto detected a graphic-style image and kept safer cutout/upscale defaults.";
+    presetNote.textContent = "Smart Auto detected a graphic-style image and targeted a standard shirt canvas.";
     return;
   }
   setRadioValue("tool", "upscale");
   document.querySelector("#mode").value = "auto";
   setRadioValue("scale", isLarge ? "2" : "4");
-  setRadioValue("sizing", "scale");
+  setRadioValue("sizing", "target");
+  setShirtTargetDefaults();
   denoise.value = "0.55";
   edgeTrim.value = "0";
   fringeCleanup.value = "0";
@@ -571,7 +617,7 @@ function applySmartPresetForFile(file, size) {
   updateInnerCleanupValue();
   syncToolUi();
   syncSizingUi(false);
-  presetNote.textContent = "Smart Auto detected a photo-style image and left upscale type on Auto.";
+  presetNote.textContent = "Smart Auto detected a photo-style image and targeted a standard shirt canvas.";
 }
 
 function numericInputValue(input) {
@@ -650,19 +696,9 @@ function plannedOutputSize(size = selectedImageSize) {
 }
 
 function fillTargetDefaults(force = false) {
-  if (!selectedImageSize || selectedSizingMode() !== "target") return;
+  if (selectedSizingMode() !== "target") return;
   if (!force && (targetWidthInput.value || targetHeightInput.value)) return;
-
-  const scale = selectedScale();
-  let width = Math.round(selectedImageSize.width * scale);
-  let height = Math.round(selectedImageSize.height * scale);
-  const capRatio = Math.min(1, maxImageDimension / Math.max(width, height));
-  if (capRatio < 1) {
-    width = Math.round(width * capRatio);
-    height = Math.round(height * capRatio);
-  }
-  targetWidthInput.value = width;
-  targetHeightInput.value = height;
+  setShirtTargetDefaults();
 }
 
 function validateResolutionForCurrentSettings(validDetail = null) {
@@ -863,9 +899,9 @@ const actionLabels = {
 };
 
 const actionNotes = {
-  upscale: "Upscale enlarges the image while keeping the original background.",
+  upscale: "Upscale enlarges the image and defaults to a padded 4500 x 5400 shirt canvas.",
   "remove-background": "Remove Background cuts out the subject and returns a transparent PNG or WebP.",
-  "remove-background-upscale": "Remove Background + Upscale cuts out the subject first, then enlarges the cleaned result.",
+  "remove-background-upscale": "Remove Background + Upscale cuts out the subject first, then targets a padded 4500 x 5400 shirt canvas.",
 };
 
 const toolLabels = {
