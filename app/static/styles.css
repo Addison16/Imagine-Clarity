@@ -368,6 +368,16 @@ h2 {
   margin-top: 0;
 }
 
+.field > label {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .label,
 .label-row {
   color: var(--muted);
@@ -884,6 +894,10 @@ input[type="number"]:focus {
 
 .preview-stage.bg-dark {
   background: #111827;
+}
+
+.preview-stage.bg-green {
+  background: #22c55e;
 }
 
 .preview-stage > img {

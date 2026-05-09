@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clarity Image Tools</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260507d" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260508a" />
   </head>
   <body>
     <main class="page-shell">
@@ -13,7 +13,7 @@
           <div class="brand-mark" aria-hidden="true">CI</div>
           <div>
             <h1>Clarity Image Tools</h1>
-            <p class="subtitle">Upscale, enhance, remove backgrounds, and inspect results with compare tools. <strong>Build 2026.05.07d</strong></p>
+            <p class="subtitle">Upscale, enhance, remove backgrounds, and prep clean print/web exports. <strong>Build 2026.05.08a</strong></p>
           </div>
         </div>
         <div class="header-actions">
@@ -36,11 +36,11 @@
               <h2>Upload Image</h2>
             </summary>
             <label class="dropzone" id="dropzone">
-              <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp" multiple />
+              <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp,image/tiff" multiple />
               <span class="drop-icon" aria-hidden="true"></span>
               <span id="file-label" class="drop-title">Drop your image here</span>
               <span id="file-meta" class="drop-copy">or click to browse</span>
-              <span id="drop-note" class="drop-note">PNG, JPG, or WEBP supported. Max 16K x 16K per side.</span>
+              <span id="drop-note" class="drop-note">PNG, JPG, WEBP, or TIFF supported. Max 16K x 16K per side.</span>
             </label>
             <p class="trust-note">Your original file is never changed.</p>
           </details>
@@ -187,6 +187,15 @@
                     <input id="target-height" name="target_height" type="number" min="1" max="16384" inputmode="numeric" placeholder="Height px" />
                   </label>
                 </div>
+                <label>
+                  <span>Fit behavior</span>
+                  <select id="target-fit" name="target_fit">
+                    <option value="stretch">Exact size, allow stretch</option>
+                    <option value="contain">Fit inside target</option>
+                    <option value="pad" selected>Pad to exact canvas</option>
+                    <option value="crop">Fill and crop to target</option>
+                  </select>
+                </label>
                 <span class="field-note">Enter width, height, or both. One blank side preserves aspect ratio.</span>
               </div>
 
@@ -394,14 +403,104 @@
               </details>
             </div>
 
-            <label class="field">
-              <span class="label">File format</span>
-              <select id="output-format" name="output_format">
-                <option value="png" selected>PNG</option>
-                <option value="jpeg">JPEG</option>
-                <option value="webp">WebP</option>
-              </select>
-            </label>
+            <details class="advanced prepress-panel">
+              <summary>Prepress & Export</summary>
+
+              <label class="field" data-upscale-only>
+                <span class="label help-label">
+                  Resize method
+                  <button class="info-tip" type="button" aria-label="Show help for resize method" aria-expanded="false" aria-controls="resize-method-help">i</button>
+                  <span id="resize-method-help" class="info-panel" role="tooltip" hidden>Nearest keeps pixel art blocky. Lanczos is sharp for graphics. Bicubic is a safe general choice. Mitchell is smoother. Preserve hard edges avoids extra sharpening.</span>
+                </span>
+                <select id="resize-method" name="resize_method">
+                  <option value="lanczos" selected>Lanczos - sharp graphics</option>
+                  <option value="bicubic">Bicubic - balanced</option>
+                  <option value="bilinear">Bilinear - soft and fast</option>
+                  <option value="nearest">Nearest - pixel art</option>
+                  <option value="mitchell">Mitchell - smoother edges</option>
+                  <option value="preserve">Preserve hard edges</option>
+                </select>
+              </label>
+
+              <label class="field" data-upscale-only>
+                <span class="label-row">
+                  <span class="help-label">
+                    Output sharpening
+                    <button class="info-tip" type="button" aria-label="Show help for output sharpening" aria-expanded="false" aria-controls="sharpen-help">i</button>
+                    <span id="sharpen-help" class="info-panel" role="tooltip" hidden>Applies a controlled non-AI unsharp mask after resizing. Lower it for photos and soft gradients; raise it carefully for text, decals, and line art.</span>
+                  </span>
+                  <output id="sharpen-value" for="sharpen-amount">70</output>
+                </span>
+                <input id="sharpen-amount" name="sharpen_amount" type="range" min="0" max="200" step="5" value="70" />
+              </label>
+
+              <div class="field" data-upscale-only>
+                <span class="label help-label">
+                  Canvas size
+                  <button class="info-tip" type="button" aria-label="Show help for canvas size" aria-expanded="false" aria-controls="canvas-help">i</button>
+                  <span id="canvas-help" class="info-panel" role="tooltip" hidden>Canvas changes the final page size without stretching the artwork. Larger values add transparent padding; smaller values crop using the selected anchor.</span>
+                </span>
+                <select id="canvas-preset">
+                  <option value="">No extra canvas</option>
+                  <option value="4500x5400">Shirt PNG - 4500 x 5400</option>
+                  <option value="5000x5000">Square art - 5000 x 5000</option>
+                  <option value="3000x3000">Etsy square - 3000 x 3000</option>
+                  <option value="1920x1080">Web banner - 1920 x 1080</option>
+                </select>
+                <div class="target-grid">
+                  <label>
+                    <span>Canvas width</span>
+                    <input id="canvas-width" name="canvas_width" type="number" min="1" max="16384" inputmode="numeric" placeholder="Auto" />
+                  </label>
+                  <label>
+                    <span>Canvas height</span>
+                    <input id="canvas-height" name="canvas_height" type="number" min="1" max="16384" inputmode="numeric" placeholder="Auto" />
+                  </label>
+                </div>
+                <label>
+                  <span>Artwork anchor</span>
+                  <select id="canvas-anchor" name="canvas_anchor">
+                    <option value="center" selected>Center</option>
+                    <option value="top">Top</option>
+                    <option value="bottom">Bottom</option>
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                    <option value="top-left">Top left</option>
+                    <option value="top-right">Top right</option>
+                    <option value="bottom-left">Bottom left</option>
+                    <option value="bottom-right">Bottom right</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="field" data-upscale-only>
+                <span class="label help-label">
+                  DPI / print size
+                  <button class="info-tip" type="button" aria-label="Show help for DPI and print size" aria-expanded="false" aria-controls="dpi-help">i</button>
+                  <span id="dpi-help" class="info-panel" role="tooltip" hidden>DPI is print metadata. It does not add pixels by itself. A 4500 x 5400 image at 300 DPI prints as 15 x 18 inches.</span>
+                </span>
+                <input id="dpi" name="dpi" type="number" min="1" max="2400" inputmode="numeric" value="300" />
+                <span id="print-size-note" class="field-note">Print size will appear after an image is selected.</span>
+              </label>
+
+              <label class="field">
+                <span class="label">File format</span>
+                <select id="output-format" name="output_format">
+                  <option value="png" selected>PNG</option>
+                  <option value="jpeg">JPEG</option>
+                  <option value="webp">WebP</option>
+                  <option value="tiff">TIFF</option>
+                </select>
+              </label>
+
+              <label class="field" id="export-quality-field">
+                <span class="label-row">
+                  <span>JPEG / WebP quality</span>
+                  <output id="export-quality-value" for="export-quality">95</output>
+                </span>
+                <input id="export-quality" name="export_quality" type="range" min="1" max="100" step="1" value="95" />
+              </label>
+            </details>
           </details>
 
           <details class="section section-dropdown" open>
@@ -450,6 +549,7 @@
             <button class="preview-bg-button" type="button" data-preview-bg="white">White</button>
             <button class="preview-bg-button" type="button" data-preview-bg="gray">Gray</button>
             <button class="preview-bg-button" type="button" data-preview-bg="dark">Black</button>
+            <button class="preview-bg-button" type="button" data-preview-bg="green">Green</button>
           </div>
 
           <div class="preview-stage">
@@ -556,6 +656,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260507d"></script>
+    <script src="/static/app.js?v=20260508a"></script>
   </body>
 </html>

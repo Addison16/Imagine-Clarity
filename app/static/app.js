@@ -67,6 +67,20 @@ const compareZoomSelect = document.querySelector("#compare-zoom-select");
 const targetWidthInput = document.querySelector("#target-width");
 const targetHeightInput = document.querySelector("#target-height");
 const targetPresetSelect = document.querySelector("#target-preset");
+const targetFitSelect = document.querySelector("#target-fit");
+const resizeMethodSelect = document.querySelector("#resize-method");
+const sharpenAmount = document.querySelector("#sharpen-amount");
+const sharpenValue = document.querySelector("#sharpen-value");
+const canvasPresetSelect = document.querySelector("#canvas-preset");
+const canvasWidthInput = document.querySelector("#canvas-width");
+const canvasHeightInput = document.querySelector("#canvas-height");
+const canvasAnchorSelect = document.querySelector("#canvas-anchor");
+const dpiInput = document.querySelector("#dpi");
+const printSizeNote = document.querySelector("#print-size-note");
+const exportQuality = document.querySelector("#export-quality");
+const exportQualityValue = document.querySelector("#export-quality-value");
+const exportQualityField = document.querySelector("#export-quality-field");
+const upscaleOnlyFields = document.querySelectorAll("[data-upscale-only]");
 const previewBgButtons = document.querySelectorAll("[data-preview-bg]");
 const previewStages = document.querySelectorAll(".preview-stage");
 const historyList = document.querySelector("#history-list");
@@ -388,6 +402,15 @@ function applyPreset(key, fromUser = false) {
   fringeCleanup.value = preset.fringeCleanup;
   innerCleanup.value = preset.innerCleanup;
   outputFormat.value = preset.format;
+  resizeMethodSelect.value = preset.resizeMethod || "lanczos";
+  targetFitSelect.value = preset.targetFit || "pad";
+  sharpenAmount.value = preset.sharpenAmount || "70";
+  dpiInput.value = preset.dpi || "300";
+  exportQuality.value = preset.exportQuality || "95";
+  canvasPresetSelect.value = "";
+  canvasWidthInput.value = preset.canvasWidth || "";
+  canvasHeightInput.value = preset.canvasHeight || "";
+  canvasAnchorSelect.value = preset.canvasAnchor || "center";
   setCheckbox("alpha-matting", preset.alphaMatting);
   setCheckbox("post-process-mask", preset.postProcess);
   setCheckbox("preserve-interior", preset.preserveInterior);
@@ -396,6 +419,9 @@ function applyPreset(key, fromUser = false) {
   updateEdgeTrimValue();
   updateFringeCleanupValue();
   updateInnerCleanupValue();
+  updateSharpenValue();
+  updateExportQualityValue();
+  updatePrintSizeNote();
   syncToolUi();
   syncSizingUi(key === "print");
   presetNote.textContent = preset.note;
@@ -466,6 +492,30 @@ function numericInputValue(input) {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : null;
 }
 
+function canvasOutputSize(size) {
+  if (!size) return null;
+  return {
+    width: numericInputValue(canvasWidthInput) || size.width,
+    height: numericInputValue(canvasHeightInput) || size.height,
+  };
+}
+
+function fitInsideSize(source, target) {
+  const ratio = Math.min(target.width / source.width, target.height / source.height);
+  return {
+    width: Math.max(1, Math.round(source.width * ratio)),
+    height: Math.max(1, Math.round(source.height * ratio)),
+  };
+}
+
+function coverTargetSize(source, target) {
+  const ratio = Math.max(target.width / source.width, target.height / source.height);
+  return {
+    width: Math.max(1, Math.round(source.width * ratio)),
+    height: Math.max(1, Math.round(source.height * ratio)),
+  };
+}
+
 function targetOutputSize(size = selectedImageSize) {
   if (!size) return null;
   let width = numericInputValue(targetWidthInput);
@@ -474,6 +524,42 @@ function targetOutputSize(size = selectedImageSize) {
   if (!width) width = Math.round(size.width * (height / size.height));
   if (!height) height = Math.round(size.height * (width / size.width));
   return { width: Math.max(1, width), height: Math.max(1, height) };
+}
+
+function plannedOutputSize(size = selectedImageSize) {
+  if (!size) return null;
+  let content;
+  let final;
+  if (usesUpscale() && selectedSizingMode() === "target") {
+    const target = targetOutputSize(size);
+    if (!target) return null;
+    const bothTargetDimensions = Boolean(targetWidthInput.value && targetHeightInput.value);
+    const fit = bothTargetDimensions ? targetFitSelect.value : "contain";
+    if (fit === "contain") {
+      content = fitInsideSize(size, target);
+      final = content;
+    } else if (fit === "pad") {
+      content = fitInsideSize(size, target);
+      final = target;
+    } else if (fit === "crop") {
+      content = coverTargetSize(size, target);
+      final = target;
+    } else {
+      content = target;
+      final = target;
+    }
+  } else if (usesUpscale()) {
+    const scale = selectedScale();
+    content = { width: Math.round(size.width * scale), height: Math.round(size.height * scale) };
+    final = content;
+  } else {
+    content = size;
+    final = size;
+  }
+  return {
+    content,
+    final: canvasOutputSize(final),
+  };
 }
 
 function fillTargetDefaults(force = false) {
@@ -503,23 +589,14 @@ function validateResolutionForCurrentSettings(validDetail = null) {
   }
 
   if (usesUpscale()) {
-    let outputWidth;
-    let outputHeight;
-
-    if (selectedSizingMode() === "target") {
-      const target = targetOutputSize();
-      if (!target) {
-        runButton.disabled = true;
-        setStatus("Error", "error", "Enter a target width, target height, or both.");
-        return false;
-      }
-      outputWidth = target.width;
-      outputHeight = target.height;
-    } else {
-      const scale = selectedScale();
-      outputWidth = Math.round(width * scale);
-      outputHeight = Math.round(height * scale);
+    const plan = plannedOutputSize();
+    if (!plan) {
+      runButton.disabled = true;
+      setStatus("Error", "error", "Enter a target width, target height, or both.");
+      return false;
     }
+    const outputWidth = plan.final.width;
+    const outputHeight = plan.final.height;
 
     if (outputWidth > maxImageDimension || outputHeight > maxImageDimension) {
       runButton.disabled = true;
@@ -531,7 +608,7 @@ function validateResolutionForCurrentSettings(validDetail = null) {
       return false;
     }
 
-    const upscaleFactor = Math.max(outputWidth / width, outputHeight / height);
+    const upscaleFactor = Math.max(plan.content.width / width, plan.content.height / height);
     if (upscaleFactor > maxUpscaleFactor) {
       runButton.disabled = true;
       setStatus(
@@ -598,7 +675,7 @@ async function loadRuntime() {
 async function setFiles(files) {
   const list = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
   if (!list.length) {
-    setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, or WEBP.");
+    setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, WEBP, or TIFF.");
     return;
   }
   if (list.length > maxBatchFiles) {
@@ -625,7 +702,7 @@ async function setFile(file) {
   if (!file) return;
 
   if (!file.type.startsWith("image/")) {
-    setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, or WEBP.");
+    setStatus("Error", "error", "Unsupported file type. Try PNG, JPG, WEBP, or TIFF.");
     return;
   }
 
@@ -664,6 +741,7 @@ async function setFile(file) {
     fillTargetDefaults(false);
     beforeMeta.textContent = `${size.width} x ${size.height} | ${fileExtension(file)} | ${formatBytes(file.size)}`;
     fileMeta.textContent = `${size.width} x ${size.height} | ${formatBytes(file.size)}`;
+    updatePrintSizeNote();
   } catch {
     beforeMeta.textContent = `${fileExtension(file)} | ${formatBytes(file.size)}`;
   }
@@ -710,6 +788,7 @@ function syncSizingUi(forceDefaults = false) {
     clearResultOnly();
     validateResolutionForCurrentSettings("Sizing updated. Start when ready.");
   }
+  updatePrintSizeNote();
 }
 
 function applyTargetPreset(value) {
@@ -724,6 +803,7 @@ function applyTargetPreset(value) {
     clearResultOnly();
     validateResolutionForCurrentSettings(`Target preset selected: ${w} x ${h}`);
   }
+  updatePrintSizeNote();
 }
 
 function syncToolUi() {
@@ -736,8 +816,10 @@ function syncToolUi() {
     panel.classList.toggle("hidden", !shouldShow);
   });
 
+  upscaleOnlyFields.forEach((field) => field.classList.toggle("hidden", !usesUpscale()));
+  const previousFormat = outputFormat.value || "png";
   outputFormat.replaceChildren();
-  const allowedFormats = usesBackgroundRemoval() ? ["png", "webp"] : ["png", "jpeg", "webp"];
+  const allowedFormats = usesBackgroundRemoval() ? ["png", "webp"] : ["png", "jpeg", "webp", "tiff"];
   formatOptions
     .filter((option) => allowedFormats.includes(option.value))
     .forEach((option) => {
@@ -746,7 +828,8 @@ function syncToolUi() {
       el.textContent = option.text;
       outputFormat.appendChild(el);
     });
-  outputFormat.value = "png";
+  outputFormat.value = allowedFormats.includes(previousFormat) ? previousFormat : "png";
+  exportQualityField.classList.toggle("hidden", !["jpeg", "webp"].includes(outputFormat.value));
 
   syncRunLabel();
   resultTitle.textContent = "Compare & Result";
@@ -758,6 +841,7 @@ function syncToolUi() {
   if (selectedFile) {
     validateResolutionForCurrentSettings("Settings updated. Start when ready.");
   }
+  updatePrintSizeNote();
 }
 
 function clearResultOnly() {
@@ -787,6 +871,7 @@ function clearWorkspace() {
   afterEmpty.classList.remove("hidden");
   beforeMeta.textContent = "No image selected";
   afterMeta.textContent = "No result yet";
+  updatePrintSizeNote();
   fileLabel.textContent = "Drop your image here";
   fileMeta.textContent = "or click to browse";
   inputChip.classList.add("hidden");
@@ -821,6 +906,26 @@ function updateBgToleranceValue() {
 
 function updateInnerCleanupValue() {
   innerCleanupValue.textContent = innerCleanup.value;
+}
+
+function updateSharpenValue() {
+  sharpenValue.textContent = sharpenAmount.value;
+}
+
+function updateExportQualityValue() {
+  exportQualityValue.textContent = exportQuality.value;
+}
+
+function updatePrintSizeNote() {
+  const plan = plannedOutputSize();
+  const dpi = numericInputValue(dpiInput);
+  if (!plan || !dpi) {
+    printSizeNote.textContent = "Print size will appear after an image is selected.";
+    return;
+  }
+  const widthIn = plan.final.width / dpi;
+  const heightIn = plan.final.height / dpi;
+  printSizeNote.textContent = `${plan.final.width} x ${plan.final.height}px at ${dpi} DPI = ${widthIn.toFixed(2)} x ${heightIn.toFixed(2)} in.`;
 }
 
 function applyCutPreset(notify = true) {
@@ -995,7 +1100,7 @@ function setPreviewBackground(value = "checker") {
     button.classList.toggle("active", button.dataset.previewBg === value);
   });
   previewStages.forEach((stage) => {
-    stage.classList.remove("bg-white", "bg-gray", "bg-dark");
+    stage.classList.remove("bg-white", "bg-gray", "bg-dark", "bg-green");
     if (value !== "checker") stage.classList.add(`bg-${value}`);
   });
 }
@@ -1479,11 +1584,83 @@ sizingInputs.forEach((input) => {
       clearResultOnly();
       validateResolutionForCurrentSettings("Target resolution updated. Start when ready.");
     }
+    updatePrintSizeNote();
   });
 });
 if (targetPresetSelect) {
   targetPresetSelect.addEventListener("change", () => applyTargetPreset(targetPresetSelect.value));
 }
+
+targetFitSelect.addEventListener("change", () => {
+  if (selectedFile) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings("Target fit updated. Start when ready.");
+  }
+  updatePrintSizeNote();
+});
+
+resizeMethodSelect.addEventListener("change", () => {
+  if (selectedFile) {
+    clearResultOnly();
+    setStatus("Ready", "ready", "Resize method updated. Start when ready.");
+  }
+});
+
+sharpenAmount.addEventListener("input", () => {
+  updateSharpenValue();
+  if (selectedFile) {
+    clearResultOnly();
+    setStatus("Ready", "ready", "Output sharpening updated. Start when ready.");
+  }
+});
+
+function applyCanvasPreset(value) {
+  if (!value) {
+    canvasWidthInput.value = "";
+    canvasHeightInput.value = "";
+  } else {
+    const [w, h] = String(value).split("x").map((n) => Number.parseInt(n, 10));
+    if (Number.isFinite(w) && Number.isFinite(h)) {
+      canvasWidthInput.value = String(w);
+      canvasHeightInput.value = String(h);
+    }
+  }
+  if (selectedFile) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings("Canvas updated. Start when ready.");
+  }
+  updatePrintSizeNote();
+}
+
+canvasPresetSelect.addEventListener("change", () => applyCanvasPreset(canvasPresetSelect.value));
+
+[canvasWidthInput, canvasHeightInput].forEach((input) => {
+  input.addEventListener("input", () => {
+    canvasPresetSelect.value = "";
+    if (selectedFile) {
+      clearResultOnly();
+      validateResolutionForCurrentSettings("Canvas updated. Start when ready.");
+    }
+    updatePrintSizeNote();
+  });
+});
+
+canvasAnchorSelect.addEventListener("change", () => {
+  if (selectedFile) {
+    clearResultOnly();
+    setStatus("Ready", "ready", "Canvas anchor updated. Start when ready.");
+  }
+});
+
+dpiInput.addEventListener("input", updatePrintSizeNote);
+
+exportQuality.addEventListener("input", () => {
+  updateExportQualityValue();
+  if (selectedFile && ["jpeg", "webp"].includes(outputFormat.value)) {
+    clearResultOnly();
+    setStatus("Ready", "ready", "Export quality updated. Start when ready.");
+  }
+});
 
 infoTips.forEach((tip) => {
   tip.addEventListener("click", (event) => {
@@ -1522,6 +1699,13 @@ bgModel.addEventListener("change", () => {
   if (selectedFile) {
     clearResultOnly();
     setStatus("Ready", "ready", "Subject type updated. Start when ready.");
+  }
+});
+outputFormat.addEventListener("change", () => {
+  exportQualityField.classList.toggle("hidden", !["jpeg", "webp"].includes(outputFormat.value));
+  if (selectedFile) {
+    clearResultOnly();
+    setStatus("Ready", "ready", "File format updated. Start when ready.");
   }
 });
 [upscaleDevice, backgroundDevice].forEach((select) => {
@@ -1593,6 +1777,9 @@ function buildPayload(file, size = selectedImageSize) {
   }
   payload.delete("target_width");
   payload.delete("target_height");
+  payload.delete("canvas_width");
+  payload.delete("canvas_height");
+  payload.delete("dpi");
   if (usesUpscale() && selectedSizingMode() === "target") {
     const target = targetOutputSize(size);
     if (target) {
@@ -1603,6 +1790,18 @@ function buildPayload(file, size = selectedImageSize) {
         payload.set("target_height", target.height);
       }
     }
+  }
+  if (usesUpscale()) {
+    if (canvasWidthInput.value) payload.set("canvas_width", canvasWidthInput.value);
+    if (canvasHeightInput.value) payload.set("canvas_height", canvasHeightInput.value);
+    if (dpiInput.value) payload.set("dpi", dpiInput.value);
+    payload.set("resize_method", resizeMethodSelect.value);
+    payload.set("target_fit", targetFitSelect.value);
+    payload.set("canvas_anchor", canvasAnchorSelect.value);
+    payload.set("export_quality", exportQuality.value);
+    payload.set("sharpen_amount", sharpenAmount.value);
+  } else {
+    ["resize_method", "target_fit", "canvas_anchor", "export_quality", "sharpen_amount"].forEach((name) => payload.delete(name));
   }
   if (tool !== "remove-background-upscale") {
     payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
@@ -1639,6 +1838,7 @@ function showResult(blob, response, fallbackName) {
 
   const width = response.headers.get("X-Output-Width");
   const height = response.headers.get("X-Output-Height");
+  const dpi = response.headers.get("X-Output-DPI") || "";
   const engine =
     response.headers.get("X-Pipeline-Engine") ||
     response.headers.get("X-Upscaler-Engine") ||
@@ -1646,7 +1846,8 @@ function showResult(blob, response, fallbackName) {
     "";
   const extension = outputFormat.value.toUpperCase();
   afterMeta.textContent = `${width} x ${height} | ${extension} | ${formatBytes(blob.size)}`;
-  resultSummary.textContent = `${width} x ${height} ${extension}`;
+  const printSummary = dpi ? ` | ${(Number(width) / Number(dpi)).toFixed(2)} x ${(Number(height) / Number(dpi)).toFixed(2)} in @ ${dpi} DPI` : "";
+  resultSummary.textContent = `${width} x ${height} ${extension}${printSummary}`;
 
   if (engine) {
     engineChip.textContent = engine;
@@ -1671,7 +1872,7 @@ function showResult(blob, response, fallbackName) {
     downloadUrl,
     sourceUrl,
     filename,
-    summary: `${width} x ${height} ${extension} | ${formatBytes(blob.size)}`,
+    summary: `${width} x ${height} ${extension}${printSummary} | ${formatBytes(blob.size)}`,
   };
 }
 
@@ -1814,6 +2015,9 @@ updateEdgeTrimValue();
 updateFringeCleanupValue();
 updateBgToleranceValue();
 updateInnerCleanupValue();
+updateSharpenValue();
+updateExportQualityValue();
+updatePrintSizeNote();
 setComparePosition(compareSlider.value);
 applyCompareMode("slider");
 applyCompareZoom("fit");

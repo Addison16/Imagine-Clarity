@@ -35,7 +35,7 @@ from app.jobs import (
     storage_summary,
 )
 from app.batch_jobs import batch_source_path, build_batch_zip, create_batch, get_batch, list_batches, retry_batch
-from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, upscale_image
+from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, resolve_upscale_sizes, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
@@ -55,8 +55,8 @@ logger.setLevel(logging.INFO)
 
 app = FastAPI(
     title="Clarity Image Tools",
-    description="Docker-hosted AI image upscaling and background removal.",
-    version="1.3.0",
+    description="Docker-hosted image upscaling, background removal, and controlled image prep.",
+    version="1.4.0",
 )
 
 app.add_middleware(
@@ -150,6 +150,14 @@ async def api_create_batch(
     output_format: str = Form("png"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
+    resize_method: str = Form("lanczos"),
+    target_fit: str = Form("stretch"),
+    canvas_width: int | None = Form(None),
+    canvas_height: int | None = Form(None),
+    canvas_anchor: str = Form("center"),
+    dpi: int | None = Form(None),
+    export_quality: int = Form(95),
+    sharpen_amount: int = Form(70),
     model: str = Form("auto"),
     cut_mode: str = Form("balanced"),
     alpha_matting: bool = Form(True),
@@ -185,7 +193,7 @@ async def api_create_batch(
     if normalized_tool == "remove-background":
         settings = vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format=output_format))
     elif normalized_tool == "remove-background-upscale":
-        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height)
+        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height, resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height, canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount)
         try:
             for metadata in metadatas:
                 _validate_upscale_resolution(metadata, upscale_options)
@@ -193,7 +201,7 @@ async def api_create_batch(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         settings = {"background": vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format="png")), "upscale": vars(upscale_options)}
     else:
-        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height)
+        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height, resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height, canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount)
         try:
             for metadata in metadatas:
                 _validate_upscale_resolution(metadata, upscale_options)
@@ -282,6 +290,19 @@ def api_capabilities() -> dict[str, object]:
         },
         "upscale": {
             "modes": ["auto", "photo", "general", "anime", "conservative"],
+            "resize_methods": ["nearest", "bilinear", "bicubic", "lanczos", "mitchell", "preserve"],
+            "target_fit_modes": ["stretch", "contain", "pad", "crop"],
+            "canvas_anchors": [
+                "center",
+                "top-left",
+                "top",
+                "top-right",
+                "left",
+                "right",
+                "bottom-left",
+                "bottom",
+                "bottom-right",
+            ],
             "max_upscale_factor": MAX_UPSCALE_FACTOR,
             "max_dimension": MAX_IMAGE_DIMENSION,
         },
@@ -335,6 +356,7 @@ def _process_json_payload(request: Request, response: StreamingResponse, tool: s
             "tool": tool,
             "output_width": headers.get("X-Output-Width"),
             "output_height": headers.get("X-Output-Height"),
+            "output_dpi": headers.get("X-Output-DPI"),
             "engine": headers.get("X-Upscaler-Engine")
             or headers.get("X-Background-Engine")
             or headers.get("X-Pipeline-Engine"),
@@ -359,6 +381,14 @@ async def api_process(
     output_format: str = Form("png"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
+    resize_method: str = Form("lanczos"),
+    target_fit: str = Form("stretch"),
+    canvas_width: int | None = Form(None),
+    canvas_height: int | None = Form(None),
+    canvas_anchor: str = Form("center"),
+    dpi: int | None = Form(None),
+    export_quality: int = Form(95),
+    sharpen_amount: int = Form(70),
     model: str = Form("auto"),
     cut_mode: str = Form("balanced"),
     alpha_matting: bool = Form(True),
@@ -380,7 +410,9 @@ async def api_process(
     if tool == "upscale":
         response = await api_upscale(
             image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
-            device=device, output_format=output_format, target_width=target_width, target_height=target_height
+            device=device, output_format=output_format, target_width=target_width, target_height=target_height,
+            resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount
         )
     elif tool == "remove-background":
         response = await api_remove_background(
@@ -393,7 +425,9 @@ async def api_process(
     elif tool == "remove-background-upscale":
         response = await api_remove_background_upscale(
             image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
-            upscale_device=device, target_width=target_width, target_height=target_height, model=model,
+            upscale_device=device, target_width=target_width, target_height=target_height,
+            resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount, model=model,
             cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim,
             fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance,
             background_device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior,
@@ -420,6 +454,14 @@ async def api_upscale(
     output_format: str = Form("png"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
+    resize_method: str = Form("lanczos"),
+    target_fit: str = Form("stretch"),
+    canvas_width: int | None = Form(None),
+    canvas_height: int | None = Form(None),
+    canvas_anchor: str = Form("center"),
+    dpi: int | None = Form(None),
+    export_quality: int = Form(95),
+    sharpen_amount: int = Form(70),
 ) -> StreamingResponse:
     raw, metadata = await _read_validated_upload(image)
 
@@ -434,6 +476,14 @@ async def api_upscale(
             output_format=output_format,
             target_width=target_width,
             target_height=target_height,
+            resize_method=resize_method,
+            target_fit=target_fit,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor,
+            dpi=dpi,
+            export_quality=export_quality,
+            sharpen_amount=sharpen_amount,
         )
         _validate_upscale_resolution(metadata, options)
         started = time.perf_counter()
@@ -480,6 +530,7 @@ async def api_upscale(
         "X-Upscaler-Engine": result.engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
+        "X-Output-DPI": str(options.dpi or ""),
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
         "X-Source-URL": str(job.get("source_download_url", "")),
@@ -503,6 +554,14 @@ async def api_remove_background_upscale(
     upscale_device: str = Form("auto"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
+    resize_method: str = Form("lanczos"),
+    target_fit: str = Form("stretch"),
+    canvas_width: int | None = Form(None),
+    canvas_height: int | None = Form(None),
+    canvas_anchor: str = Form("center"),
+    dpi: int | None = Form(None),
+    export_quality: int = Form(95),
+    sharpen_amount: int = Form(70),
     model: str = Form("auto"),
     cut_mode: str = Form("balanced"),
     alpha_matting: bool = Form(True),
@@ -521,8 +580,12 @@ async def api_remove_background_upscale(
 
     try:
         output_format = output_format.lower().strip()
-        if output_format not in SUPPORTED_BG_FORMATS:
-            raise ValueError("All-in-one output format must be png or webp so transparency is preserved.")
+        if output_format == "jpg":
+            output_format = "jpeg"
+        if output_format == "tif":
+            output_format = "tiff"
+        if output_format not in (SUPPORTED_FORMATS - {"jpeg", "jpg"}):
+            raise ValueError("All-in-one output format must be png, webp, or tiff so transparency is preserved.")
 
         background_options = BackgroundOptions(
             model=model,
@@ -549,6 +612,14 @@ async def api_remove_background_upscale(
             output_format=output_format,
             target_width=target_width,
             target_height=target_height,
+            resize_method=resize_method,
+            target_fit=target_fit,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor,
+            dpi=dpi,
+            export_quality=export_quality,
+            sharpen_amount=sharpen_amount,
         )
         _validate_upscale_resolution(metadata, upscale_options)
 
@@ -605,6 +676,7 @@ async def api_remove_background_upscale(
         "X-Pipeline-Engine": pipeline_engine,
         "X-Output-Width": str(result.width),
         "X-Output-Height": str(result.height),
+        "X-Output-DPI": str(upscale_options.dpi or ""),
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
         "X-Source-URL": str(job.get("source_download_url", "")),
@@ -745,14 +817,15 @@ def _validate_input_resolution(metadata: dict[str, object]) -> None:
 def _validate_upscale_resolution(metadata: dict[str, object], options: UpscaleOptions) -> None:
     width = int(metadata["width"])
     height = int(metadata["height"])
-    output_width, output_height = _resolve_upscale_output_size(width, height, options)
+    content_size, output_size = resolve_upscale_sizes(width, height, options)
+    output_width, output_height = output_size
     if output_width > MAX_IMAGE_DIMENSION or output_height > MAX_IMAGE_DIMENSION:
         raise ValueError(
             f"Requested output would be {output_width} x {output_height}. "
             f"Maximum output resolution is {MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}. "
             "Choose a smaller output size or resize the source image first."
         )
-    upscale_factor = max(output_width / width, output_height / height)
+    upscale_factor = max(content_size[0] / width, content_size[1] / height)
     if upscale_factor > MAX_UPSCALE_FACTOR:
         raise ValueError(
             f"Requested output would be {upscale_factor:.2f}x the source image. "
@@ -761,17 +834,7 @@ def _validate_upscale_resolution(metadata: dict[str, object], options: UpscaleOp
 
 
 def _resolve_upscale_output_size(width: int, height: int, options: UpscaleOptions) -> tuple[int, int]:
-    target_width = options.target_width
-    target_height = options.target_height
-    if target_width is None and target_height is None:
-        scale = float(options.scale)
-        return round(width * scale), round(height * scale)
-
-    if target_width is None:
-        target_width = round(width * (target_height / height))
-    if target_height is None:
-        target_height = round(height * (target_width / width))
-    return max(1, int(target_width)), max(1, int(target_height))
+    return resolve_upscale_sizes(width, height, options)[1]
 
 
 def _safe_stem(filename: str | None) -> str:

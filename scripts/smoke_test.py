@@ -20,6 +20,8 @@ def main() -> int:
     capabilities = requests.get(f"{base_url}/api/capabilities", timeout=10)
     capabilities.raise_for_status()
     assert "remove-background-upscale" in capabilities.json()["tools"], capabilities.text
+    assert "tiff" in capabilities.json()["output_formats"], capabilities.text
+    assert "lanczos" in capabilities.json()["upscale"]["resize_methods"], capabilities.text
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -80,6 +82,59 @@ def main() -> int:
     response.raise_for_status()
     out = Image.open(io.BytesIO(response.content))
     assert out.size == (320, 240), out.size
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/upscale",
+        files={"image": ("pad.png", buffer, "image/png")},
+        data={
+            "scale": "2",
+            "mode": "conservative",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "device": "cpu",
+            "target_width": "120",
+            "target_height": "120",
+            "target_fit": "pad",
+            "resize_method": "nearest",
+            "dpi": "300",
+            "sharpen_amount": "0",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    assert response.headers["X-Output-DPI"] == "300", response.headers
+    out = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    assert out.size == (120, 120), out.size
+    assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
+
+    rgba = Image.new("RGBA", (20, 10), (0, 0, 0, 0))
+    rgba.putpixel((10, 5), (255, 0, 0, 128))
+    buffer = io.BytesIO()
+    rgba.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/upscale",
+        files={"image": ("alpha-pad.png", buffer, "image/png")},
+        data={
+            "mode": "conservative",
+            "device": "cpu",
+            "target_width": "40",
+            "target_height": "40",
+            "target_fit": "pad",
+            "resize_method": "nearest",
+            "sharpen_amount": "0",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    out = Image.open(io.BytesIO(response.content)).convert("RGBA")
+    assert out.getpixel((20, 20))[3] == 128, out.getpixel((20, 20))
 
     too_large = Image.new("RGB", (2050, 2050), "#ffffff")
     buffer = io.BytesIO()
