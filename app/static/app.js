@@ -88,6 +88,9 @@ const batchResults = document.querySelector("#batch-results");
 const refreshHistory = document.querySelector("#refresh-history");
 const clearHistory = document.querySelector("#clear-history");
 const toggleHistoryPreview = document.querySelector("#toggle-history-preview");
+const historySearch = document.querySelector("#history-search");
+const historyFilter = document.querySelector("#history-filter");
+const historySort = document.querySelector("#history-sort");
 const diagnosticsPanel = document.querySelector("#diagnostics-panel");
 const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
 const viewTabs = document.querySelectorAll("[data-view-target]");
@@ -110,8 +113,10 @@ let compareZoom = "fit";
 let compareNaturalSize = null;
 let differenceKey = "";
 let differenceToken = 0;
-let historyPreviewEnabled = true;
+let historyPreviewEnabled = false;
 let currentBatchId = null;
+let historyJobsCache = [];
+let historyBatchesCache = [];
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
   value: option.value,
@@ -672,7 +677,7 @@ async function loadRuntime() {
     maxBatchFiles = health.max_batch_files || maxBatchFiles;
     maxBatchTotalMb = health.max_batch_total_mb || maxBatchTotalMb;
     document.querySelector("#drop-note").textContent =
-      `PNG, JPG, or WEBP supported. Max ${resolutionLimitLabel()} per side. Batches up to ${maxBatchFiles} files or ${maxBatchTotalMb} MB.`;
+      `PNG, JPG, WEBP, or TIFF supported. Max ${resolutionLimitLabel()} per side. Batches up to ${maxBatchFiles} files or ${maxBatchTotalMb} MB.`;
     const runtime = health.runtime || {};
     if (runtime.cuda_available) {
       setRuntime(`GPU: ${runtime.cuda_device || "CUDA"}`, "good");
@@ -784,10 +789,35 @@ function selectedCutMode() {
   return document.querySelector('input[name="cut_mode"]:checked')?.value || "balanced";
 }
 
+const actionLabels = {
+  upscale: "Upscale Image",
+  "remove-background": "Remove Background",
+  "remove-background-upscale": "Remove Background + Upscale",
+};
+
+const actionNotes = {
+  upscale: "Upscale enlarges the image while keeping the original background.",
+  "remove-background": "Remove Background cuts out the subject and returns a transparent PNG or WebP.",
+  "remove-background-upscale": "Remove Background + Upscale cuts out the subject first, then enlarges the cleaned result.",
+};
+
+const toolLabels = {
+  upscale: "Upscale",
+  "remove-background": "Remove Background",
+  "remove-background-upscale": "Remove Background + Upscale",
+};
+
 function actionText() {
-  if (selectedTool() === "remove-background") return "Remove Back Ground";
-  if (selectedTool() === "remove-background-upscale") return "Remove Back Ground + Upscale";
-  return "Upscale Image";
+  return actionLabels[selectedTool()] || "Process Image";
+}
+
+function toolLabel(value) {
+  return toolLabels[value] || value || "Job";
+}
+
+function syncActionNote() {
+  const actionNote = document.querySelector("#action-note");
+  if (actionNote) actionNote.textContent = actionNotes[selectedTool()] || "";
 }
 
 function syncRunLabel() {
@@ -849,6 +879,7 @@ function syncToolUi() {
   exportQualityField.classList.toggle("hidden", !["jpeg", "webp"].includes(outputFormat.value));
 
   syncRunLabel();
+  syncActionNote();
   resultTitle.textContent = "Compare & Result";
   if (!afterUrl) {
     afterMeta.textContent = "No result yet";
@@ -1126,6 +1157,7 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   const resolvedResult = absoluteUrl(resultUrl || downloadUrl);
   const resolvedSource = absoluteUrl(sourceUrl);
   if (!resolvedResult) return;
+  setActiveView("workspace");
 
   revoke(beforeUrl);
   revoke(afterUrl);
@@ -1145,6 +1177,7 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   afterImg.src = afterUrl;
   afterEmpty.classList.add("hidden");
   afterMeta.textContent = summary || filename || "Saved result";
+  resultTitle.textContent = `Viewing saved result${filename ? `: ${filename}` : ""}`;
   resultSummary.textContent = summary || filename || "Saved result";
   resultDownload.href = afterUrl;
   resultDownload.download = filename || "result.png";
@@ -1160,6 +1193,7 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   }
   setStep(2);
   setStatus("Ready", "ready", `Previewing ${filename || "saved result"}.`);
+  document.querySelector(".result-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function batchToResults(batch) {
@@ -1318,39 +1352,137 @@ async function retryBatch(batchId, failedOnly = true) {
   await loadDiagnostics();
 }
 
+function historySearchTextForJob(job) {
+  const output = job.output || {};
+  return [
+    job.id,
+    job.filename,
+    job.source_filename,
+    job.tool,
+    output.format,
+    output.width,
+    output.height,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function historySearchTextForBatch(batch) {
+  const itemNames = (batch.items || [])
+    .map((item) => [item.filename, item.result_filename, item.status].filter(Boolean).join(" "))
+    .join(" ");
+  return [batch.id, batch.tool, batch.status, itemNames].filter(Boolean).join(" ").toLowerCase();
+}
+
+function historyTimestamp(item) {
+  const value = new Date(item.created_at || 0).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function historySize(item) {
+  if (item.output?.size_bytes) return item.output.size_bytes;
+  return (item.items || []).reduce((total, batchItem) => total + (batchItem.size_bytes || 0), 0);
+}
+
+function selectedHistoryFilter() {
+  return historyFilter?.value || "all";
+}
+
+function selectedHistorySearch() {
+  return (historySearch?.value || "").trim().toLowerCase();
+}
+
+function selectedHistorySort() {
+  return historySort?.value || "newest";
+}
+
+function filterHistoryItems(items, kind) {
+  const filter = selectedHistoryFilter();
+  const query = selectedHistorySearch();
+  return items.filter((item) => {
+    const tool = item.tool || "";
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "batch" && kind === "batch") ||
+      (filter !== "batch" && tool === filter);
+    if (!matchesFilter) return false;
+    if (!query) return true;
+    const searchable = kind === "batch" ? historySearchTextForBatch(item) : historySearchTextForJob(item);
+    return searchable.includes(query);
+  });
+}
+
+function sortHistoryItems(items) {
+  const sort = selectedHistorySort();
+  return [...items].sort((a, b) => {
+    if (sort === "oldest") return historyTimestamp(a) - historyTimestamp(b);
+    if (sort === "size") return historySize(b) - historySize(a);
+    if (sort === "tool") return String(a.tool || "").localeCompare(String(b.tool || ""));
+    return historyTimestamp(b) - historyTimestamp(a);
+  });
+}
+
+function historyStatusBadge(status = "completed") {
+  const badge = document.createElement("span");
+  badge.className = `status-pill ${status === "failed" || status === "error" ? "error" : status === "completed" || status === "complete" || status === "done" ? "complete" : "pending"}`;
+  badge.textContent = status === "done" ? "Completed" : status || "Completed";
+  return badge;
+}
+
+function highlightHistorySelection(key) {
+  document.querySelectorAll("[data-history-key]").forEach((row) => {
+    row.classList.toggle("selected", row.dataset.historyKey === key);
+  });
+}
+
 function renderHistory(jobs, batches = []) {
   historyList.replaceChildren();
+  const visibleBatches = sortHistoryItems(filterHistoryItems(batches, "batch"));
+  const visibleJobs = sortHistoryItems(filterHistoryItems(jobs, "job"));
+
   if (!jobs.length && !batches.length) {
     const empty = document.createElement("p");
     empty.className = "muted-copy";
-    empty.textContent = "No saved jobs or batches yet. Process images and the outputs will appear here.";
+    empty.textContent = "No history yet. Process images and the outputs will appear here.";
     historyList.append(empty);
     return;
   }
 
-  if (batches.length) {
+  if (!visibleJobs.length && !visibleBatches.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted-copy";
+    empty.textContent = "No history items match the current search or filter.";
+    historyList.append(empty);
+    return;
+  }
+
+  if (visibleBatches.length) {
     const batchHeading = document.createElement("h3");
     batchHeading.className = "history-section-title";
-    batchHeading.textContent = "Batch Jobs";
+    batchHeading.textContent = `Batch Jobs (${visibleBatches.length})`;
     historyList.append(batchHeading);
-    batches.forEach((batch) => {
+    visibleBatches.forEach((batch) => {
+      const batchKey = `batch-${batch.id}`;
       const card = document.createElement("div");
       card.className = "batch-card";
+      card.dataset.historyKey = batchKey;
       const header = document.createElement("div");
       header.className = "batch-card-header";
       const copy = document.createElement("div");
       const title = document.createElement("strong");
       title.textContent = `Batch ${String(batch.id || "").slice(0, 8)}`;
+      title.title = batch.id || "Batch";
       const meta = document.createElement("span");
       meta.textContent =
-        `${batch.tool || "batch"} | ${batch.completed || 0}/${batch.total || 0} complete | ${batch.status || "queued"} | ${formatDate(batch.created_at)}`;
-      copy.append(title, meta);
+        `${toolLabel(batch.tool)} | ${batch.completed || 0}/${batch.total || 0} complete | ${formatDate(batch.created_at)}`;
+      const statusLine = document.createElement("div");
+      statusLine.className = "history-meta-line";
+      statusLine.append(historyStatusBadge(batch.status || "queued"), meta);
+      copy.append(title, statusLine);
       const actions = document.createElement("div");
       actions.className = "job-actions";
       if (batch.zip_url && (batch.completed || 0) > 0) {
         const zipLink = document.createElement("a");
         zipLink.href = batch.zip_url;
-        zipLink.textContent = "ZIP";
+        zipLink.textContent = "Download ZIP";
         actions.append(zipLink);
       }
       const openButton = document.createElement("button");
@@ -1359,6 +1491,7 @@ function renderHistory(jobs, batches = []) {
       openButton.textContent = "Open";
       openButton.addEventListener("click", () => {
         currentBatchId = batch.id;
+        highlightHistorySelection(batchKey);
         renderBatchResults(batchToResults(batch), batch);
         setStatus("Ready", "ready", `Loaded batch ${String(batch.id || "").slice(0, 8)}.`);
       });
@@ -1386,24 +1519,30 @@ function renderHistory(jobs, batches = []) {
     });
   }
 
-  if (jobs.length) {
+  if (visibleJobs.length) {
     const jobHeading = document.createElement("h3");
     jobHeading.className = "history-section-title";
-    jobHeading.textContent = "Image Jobs";
+    jobHeading.textContent = `Image Jobs (${visibleJobs.length})`;
     historyList.append(jobHeading);
   }
 
-  jobs.forEach((job) => {
+  visibleJobs.forEach((job) => {
+    const jobKey = `job-${job.id}`;
     const row = document.createElement("div");
     row.className = "job-row";
+    row.dataset.historyKey = jobKey;
     const copy = document.createElement("div");
     const title = document.createElement("strong");
     title.textContent = job.filename || job.source_filename || "Processed image";
+    title.title = job.filename || job.source_filename || "Processed image";
     const meta = document.createElement("span");
     const output = job.output || {};
     meta.textContent =
-      `${job.tool || "job"} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`;
-    copy.append(title, meta);
+      `${toolLabel(job.tool)} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`;
+    const statusLine = document.createElement("div");
+    statusLine.className = "history-meta-line";
+    statusLine.append(historyStatusBadge("completed"), meta);
+    copy.append(title, statusLine);
     if (historyPreviewEnabled && job.download_url) {
       copy.append(makePreviewThumbs(job.source_download_url, job.download_url, job.filename || job.source_filename || "Processed image"));
     }
@@ -1413,34 +1552,38 @@ function renderHistory(jobs, batches = []) {
     link.textContent = "Download";
     const actions = document.createElement("div");
     actions.className = "job-actions";
-    if (historyPreviewEnabled) {
-      const previewButton = document.createElement("button");
-      previewButton.className = "small-button";
-      previewButton.type = "button";
-      previewButton.textContent = "Preview";
-      previewButton.setAttribute("aria-label", `Preview ${job.filename || job.source_filename || "processed image"}`);
-      previewButton.addEventListener("click", () => openStoredPreview({
+    const previewButton = document.createElement("button");
+    previewButton.className = "small-button";
+    previewButton.type = "button";
+    previewButton.textContent = "Open in Viewer";
+    previewButton.setAttribute("aria-label", `Preview ${job.filename || job.source_filename || "processed image"}`);
+    previewButton.addEventListener("click", () => {
+      highlightHistorySelection(jobKey);
+      openStoredPreview({
         sourceUrl: job.source_download_url,
         resultUrl: job.download_url,
         filename: job.filename || "result.png",
         summary: meta.textContent,
-      }));
-      actions.append(previewButton);
-      if (job.source_download_url) {
-        const compareButton = document.createElement("button");
-        compareButton.className = "small-button";
-        compareButton.type = "button";
-        compareButton.textContent = "Compare";
-        compareButton.setAttribute("aria-label", `Compare ${job.filename || job.source_filename || "processed image"}`);
-        compareButton.addEventListener("click", () => openStoredPreview({
+      });
+    });
+    actions.append(previewButton);
+    if (job.source_download_url) {
+      const compareButton = document.createElement("button");
+      compareButton.className = "small-button";
+      compareButton.type = "button";
+      compareButton.textContent = "Compare";
+      compareButton.setAttribute("aria-label", `Compare ${job.filename || job.source_filename || "processed image"}`);
+      compareButton.addEventListener("click", () => {
+        highlightHistorySelection(jobKey);
+        openStoredPreview({
           sourceUrl: job.source_download_url,
           resultUrl: job.download_url,
           filename: job.filename || "result.png",
           summary: meta.textContent,
           compare: true,
-        }));
-        actions.append(compareButton);
-      }
+        });
+      });
+      actions.append(compareButton);
     }
     const deleteButton = document.createElement("button");
     deleteButton.className = "small-button danger-button";
@@ -1462,9 +1605,11 @@ async function loadHistory() {
     if (!jobsResponse.ok || !batchesResponse.ok) throw new Error("history failed");
     const jobsBody = await jobsResponse.json();
     const batchesBody = await batchesResponse.json();
-    renderHistory(jobsBody.jobs || [], batchesBody.batches || []);
+    historyJobsCache = jobsBody.jobs || [];
+    historyBatchesCache = batchesBody.batches || [];
+    renderHistory(historyJobsCache, historyBatchesCache);
   } catch {
-    historyList.innerHTML = '<p class="muted-copy">Could not load saved jobs.</p>';
+    historyList.innerHTML = '<p class="muted-copy">Could not load history.</p>';
   }
 }
 
@@ -1485,7 +1630,7 @@ async function pollBatch(batchId) {
 async function deleteSavedJob(job) {
   const name = job.filename || job.source_filename || "this saved job";
   const confirmed = window.confirm(
-    `Delete "${name}" from Saved Jobs? This removes the saved output file and its history entry.`,
+    `Delete "${name}" from History? This removes the saved output file and its history entry.`,
   );
   if (!confirmed) return;
 
@@ -1507,7 +1652,7 @@ async function deleteSavedJob(job) {
 
 async function clearSavedJobs() {
   const confirmed = window.confirm(
-    "Clear all recent saved jobs? This removes every saved output file and history entry from Docker storage.",
+    "Clear all recent history? This removes every saved output file and history entry from Docker storage.",
   );
   if (!confirmed) return;
 
@@ -1519,11 +1664,11 @@ async function clearSavedJobs() {
       const body = await response.json().catch(() => ({}));
       throw new Error(body.error || `Clear failed with ${response.status}`);
     }
-    setStatus("Ready", "ready", "Recent saved jobs cleared.");
+    setStatus("Ready", "ready", "Recent history cleared.");
     await loadHistory();
     await loadDiagnostics();
   } catch (error) {
-    setStatus("Error", "error", error.message || "Could not clear saved jobs.");
+    setStatus("Error", "error", error.message || "Could not clear history.");
   }
 }
 
@@ -1749,13 +1894,18 @@ refreshHistory.addEventListener("click", loadHistory);
 clearHistory.addEventListener("click", clearSavedJobs);
 toggleHistoryPreview.addEventListener("click", () => {
   historyPreviewEnabled = !historyPreviewEnabled;
-  toggleHistoryPreview.textContent = `Preview: ${historyPreviewEnabled ? "On" : "Off"}`;
-  loadHistory();
+  toggleHistoryPreview.textContent = `Thumbnails: ${historyPreviewEnabled ? "On" : "Off"}`;
+  renderHistory(historyJobsCache, historyBatchesCache);
 });
 refreshDiagnostics.addEventListener("click", loadDiagnostics);
 
 viewTabs.forEach((tab) => {
   tab.addEventListener("click", () => setActiveView(tab.dataset.viewTarget));
+});
+
+[historySearch, historyFilter, historySort].forEach((control) => {
+  control?.addEventListener("input", () => renderHistory(historyJobsCache, historyBatchesCache));
+  control?.addEventListener("change", () => renderHistory(historyJobsCache, historyBatchesCache));
 });
 
 previewBgButtons.forEach((button) => {
@@ -1921,8 +2071,8 @@ form.addEventListener("submit", async (event) => {
 
   const tool = selectedTool();
   let actionLabel = "Enhancing image";
-  if (tool === "remove-background") actionLabel = "Removing back ground";
-  if (tool === "remove-background-upscale") actionLabel = "Removing back ground and upscaling";
+  if (tool === "remove-background") actionLabel = "Removing background";
+  if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
   setBusyStatus(filesToProcess.length > 1 ? `Batch ${actionLabel.toLowerCase()}` : actionLabel);
 
   try {
@@ -2010,7 +2160,7 @@ form.addEventListener("submit", async (event) => {
       setStatus(
         "Complete",
         "complete",
-        `${results.length - failures.length} finished, ${failures.length} failed. Check saved jobs for downloads.`,
+        `${results.length - failures.length} finished, ${failures.length} failed. Check History for downloads.`,
       );
     } else if (filesToProcess.length > 1) {
       setStatus("Complete", "complete", `Batch complete. ${results.length} images are ready to download.`);

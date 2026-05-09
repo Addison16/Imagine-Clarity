@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Clarity Image Tools</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260509b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260509c" />
   </head>
   <body>
     <main class="page-shell">
@@ -13,7 +13,7 @@
           <div class="brand-mark" aria-hidden="true">CI</div>
           <div>
             <h1>Clarity Image Tools</h1>
-            <p class="subtitle">Upload an image, choose a simple action, then compare and download the result. <strong>Build 2026.05.09b</strong></p>
+            <p class="subtitle">Upload an image, choose a simple action, then compare and download the result. <strong>Build 2026.05.09c</strong></p>
           </div>
         </div>
         <div class="header-actions">
@@ -23,8 +23,8 @@
       </header>
 
       <nav class="view-nav" aria-label="Main sections">
-        <button class="view-tab active" type="button" data-view-target="workspace" aria-selected="true">Workbench</button>
-        <button class="view-tab" type="button" data-view-target="jobs" aria-selected="false">Saved Jobs</button>
+        <button class="view-tab active" type="button" data-view-target="workspace" aria-selected="true">Process</button>
+        <button class="view-tab" type="button" data-view-target="jobs" aria-selected="false">History</button>
         <button class="view-tab" type="button" data-view-target="diagnostics" aria-selected="false">Diagnostics</button>
       </nav>
 
@@ -86,16 +86,21 @@
                 </label>
                 <label>
                   <input type="radio" name="tool" value="remove-background" />
-                  <span>Remove Back Ground</span>
+                  <span>Remove Background</span>
                 </label>
                 <label>
                   <input type="radio" name="tool" value="remove-background-upscale" />
-                  <span>All-in-One</span>
+                  <span>Remove Background + Upscale</span>
                 </label>
               </div>
+              <span id="action-note" class="field-note">Upscale enlarges the image while keeping the original background.</span>
             </div>
 
             <div class="tool-panel" data-tool-panel="upscale">
+              <div class="tool-panel-heading">
+                <strong>Upscale Settings</strong>
+                <span>Choose the final size and enhancement style.</span>
+              </div>
               <label class="field">
                 <span class="label">Enhancement type</span>
                 <select id="mode" name="mode">
@@ -266,6 +271,10 @@
             </div>
 
             <div class="tool-panel hidden" data-tool-panel="remove-background">
+              <div class="tool-panel-heading">
+                <strong>Background Removal Settings</strong>
+                <span>Choose the subject type and how strongly the background should be cut.</span>
+              </div>
               <label class="field">
                 <span class="label">Subject type</span>
                 <select id="bg-model" name="model">
@@ -556,7 +565,7 @@
           </header>
 
           <div class="preview-toolbar" aria-label="Preview background">
-            <span>Preview Back Ground</span>
+            <span>Preview Background</span>
             <button class="preview-bg-button active" type="button" data-preview-bg="checker">Checker</button>
             <button class="preview-bg-button" type="button" data-preview-bg="white">White</button>
             <button class="preview-bg-button" type="button" data-preview-bg="gray">Gray</button>
@@ -585,8 +594,8 @@
 
             <div id="after-empty" class="empty-state">
               <span class="empty-icon result-icon" aria-hidden="true"></span>
-              <strong>Your result will appear here</strong>
-              <span>After processing, you can compare and download your finished image.</span>
+              <strong>Result preview</strong>
+              <span>Upload an image and click Process. After processing, use the background buttons to inspect transparency.</span>
             </div>
 
             <div id="processing" class="processing hidden">
@@ -639,18 +648,43 @@
         <article class="card utility-card utility-card-wide">
           <header class="utility-header">
             <div>
-              <h2>Saved Jobs</h2>
-              <p>Recent single-image and batch outputs are saved in Docker storage for preview, download, and cleanup.</p>
+              <h2>History</h2>
+              <p>Search, filter, preview, download, or clean up saved single-image and batch outputs.</p>
             </div>
             <div class="utility-actions">
-              <button id="toggle-history-preview" class="small-button" type="button">Preview: On</button>
+              <button id="toggle-history-preview" class="small-button" type="button">Thumbnails: Off</button>
               <button id="refresh-history" class="small-button" type="button">Refresh</button>
               <button id="clear-history" class="small-button danger-button" type="button">Clear Recent</button>
             </div>
           </header>
+          <div class="history-controls" aria-label="History filters">
+            <label>
+              <span>Search</span>
+              <input id="history-search" type="search" placeholder="Filename, batch id, or tool" autocomplete="off" />
+            </label>
+            <label>
+              <span>Filter</span>
+              <select id="history-filter">
+                <option value="all">All jobs</option>
+                <option value="upscale">Upscale</option>
+                <option value="remove-background">Remove Background</option>
+                <option value="remove-background-upscale">Remove Background + Upscale</option>
+                <option value="batch">Batch only</option>
+              </select>
+            </label>
+            <label>
+              <span>Sort</span>
+              <select id="history-sort">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="size">File size</option>
+                <option value="tool">Tool type</option>
+              </select>
+            </label>
+          </div>
           <div id="batch-results" class="batch-results hidden" aria-live="polite"></div>
           <div id="history-list" class="history-list">
-            <p class="muted-copy">No saved jobs loaded yet.</p>
+            <p class="muted-copy">No history loaded yet.</p>
           </div>
         </article>
       </section>
@@ -671,6 +705,6 @@
       </section>
     </main>
 
-    <script src="/static/app.js?v=20260509b"></script>
+    <script src="/static/app.js?v=20260509c"></script>
   </body>
 </html>
