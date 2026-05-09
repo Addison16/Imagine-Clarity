@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" role="img" aria-labelledby="title desc">
+  <title id="title">Imagine Clarity logo</title>
+  <desc id="desc">Imagine Clarity wordmark with blue and cyan lens logo.</desc>
+  <defs>
+    <linearGradient id="bg" x1="10" y1="8" x2="90" y2="96" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset="0.48" stop-color="#315CFF"/>
+      <stop offset="1" stop-color="#0EA5A4"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="26" y1="28" x2="78" y2="82" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF4FF"/>
+      <stop offset="0.5" stop-color="#8EDBFF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="16" width="88" height="88" rx="24" fill="url(#bg)"/>
+  <path d="M28 62c5.9-14.7 15.3-22 28.1-22 12.9 0 22 7.3 27.4 22-5.4 14.7-14.5 22-27.4 22-12.8 0-22.2-7.3-28.1-22Z" fill="#F8FAFC" opacity="0.96"/>
+  <circle cx="56" cy="62" r="16" fill="#111827"/>
+  <circle cx="56" cy="62" r="8.5" fill="url(#shine)"/>
+  <path d="M65 32l3.3 7.4 7.4 3.3-7.4 3.3-3.3 7.4-3.3-7.4-7.4-3.3 7.4-3.3L65 32Z" fill="#FFFFFF"/>
+  <rect x="30" y="32" width="7" height="7" rx="2" fill="#D9F8FF" opacity="0.9"/>
+  <rect x="39" y="32" width="7" height="7" rx="2" fill="#D9F8FF" opacity="0.54"/>
+  <rect x="30" y="41" width="7" height="7" rx="2" fill="#D9F8FF" opacity="0.54"/>
+  <path d="M31 87h51" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+  <text x="126" y="58" fill="#111827" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="36" font-weight="800" letter-spacing="0">Imagine</text>
+  <text x="126" y="92" fill="#315CFF" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="36" font-weight="800" letter-spacing="0">Clarity</text>
+  <text x="322" y="74" fill="#64748B" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="18" font-weight="700" letter-spacing="0">creator image tools</text>
+</svg>

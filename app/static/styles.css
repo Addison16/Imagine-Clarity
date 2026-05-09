@@ -10,6 +10,9 @@
   --muted: #64748b;
   --accent: #4f7cff;
   --accent-hover: #3f68e8;
+  --brand-blue: #315cff;
+  --brand-cyan: #0ea5a4;
+  --brand-ink: #111827;
   --teal: #0f766e;
   --success: #16a34a;
   --warning: #b45309;
@@ -26,7 +29,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(90deg, rgba(79, 124, 255, 0.16), rgba(15, 118, 110, 0.12)) 0 0 / 100% 6px no-repeat,
+    linear-gradient(90deg, rgba(49, 92, 255, 0.2), rgba(14, 165, 164, 0.16)) 0 0 / 100% 6px no-repeat,
     var(--bg);
   color: var(--text);
   font-family:
@@ -61,35 +64,63 @@ label {
 
 .brand {
   display: flex;
-  gap: 14px;
+  gap: 13px;
   align-items: flex-start;
   min-width: 0;
 }
 
-.brand-mark {
-  width: 46px;
-  height: 46px;
+.brand-logo-link {
   flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #111827, #4f7cff 58%, #0f766e);
-  color: #ffffff;
-  font-size: 14px;
+  display: inline-flex;
+  border-radius: 14px;
+  text-decoration: none;
+}
+
+.brand-logo-link:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.brand-mark {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  display: block;
+  border-radius: 14px;
+  filter: drop-shadow(0 10px 22px rgba(15, 23, 42, 0.14));
+}
+
+.brand-copy {
+  min-width: 0;
+  padding-top: 1px;
+}
+
+.brand-kicker {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  margin-bottom: 4px;
+  border: 1px solid #c6d4ff;
+  border-radius: 999px;
+  background: #eef3ff;
+  color: var(--brand-blue);
+  padding: 0 8px;
+  font-size: 11px;
   font-weight: 800;
-  box-shadow: var(--shadow);
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: 30px;
   line-height: 1.1;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0;
 }
 
 .subtitle {
-  margin: 7px 0 0;
+  margin: 6px 0 0;
   color: var(--muted);
   font-size: 15px;
   font-weight: 400;
@@ -136,8 +167,8 @@ h1 {
 .view-tab:hover,
 .view-tab:focus-visible,
 .view-tab.active {
-  background: #eef3ff;
-  color: var(--accent-hover);
+  background: linear-gradient(135deg, #eef3ff, #ecfeff);
+  color: var(--brand-blue);
 }
 
 .view-tab:focus-visible {
@@ -250,8 +281,8 @@ h1 {
 
 .step.active {
   border-color: #b9c8ff;
-  background: #eef3ff;
-  color: var(--accent-hover);
+  background: linear-gradient(135deg, #eef3ff, #ecfeff);
+  color: var(--brand-blue);
 }
 
 .section {
@@ -354,8 +385,8 @@ h2 {
 
 .dropzone:hover,
 .dropzone.dragging {
-  border-color: var(--accent);
-  background: var(--surface-blue);
+  border-color: var(--brand-blue);
+  background: linear-gradient(135deg, #f3f6ff, #ecfeff);
   transform: translateY(-1px);
 }
 
@@ -390,7 +421,7 @@ h2 {
   position: absolute;
   left: 50%;
   top: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--brand-blue), var(--brand-cyan));
   transform: translate(-50%, -50%);
 }
 
@@ -634,7 +665,9 @@ input[type="number"]:focus {
   padding: 12px;
   border: 1px solid #b9c8ff;
   border-radius: 8px;
-  background: #f3f6ff;
+  background:
+    linear-gradient(135deg, rgba(49, 92, 255, 0.09), rgba(14, 165, 164, 0.08)),
+    #ffffff;
 }
 
 .recommendation-card strong {
@@ -709,7 +742,9 @@ input[type="number"]:focus {
 .action-card:has(input:checked),
 .action-card-button.active {
   border-color: #9db4ff;
-  background: #f3f6ff;
+  background:
+    linear-gradient(135deg, rgba(49, 92, 255, 0.08), rgba(14, 165, 164, 0.06)),
+    #ffffff;
   box-shadow: 0 1px 6px rgba(15, 23, 42, 0.08);
   transform: translateY(-1px);
 }
@@ -952,8 +987,9 @@ body:not(.pro-mode) .advanced {
 
 .primary-button {
   width: 100%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--brand-blue), var(--brand-cyan));
   color: #ffffff;
+  box-shadow: 0 10px 20px rgba(49, 92, 255, 0.18);
 }
 
 .primary-button:not(:disabled):hover,
@@ -963,7 +999,7 @@ body:not(.pro-mode) .advanced {
 }
 
 .primary-button:not(:disabled):hover {
-  background: var(--accent-hover);
+  background: linear-gradient(135deg, #254be8, #0c8f8e);
 }
 
 .primary-button:disabled,
