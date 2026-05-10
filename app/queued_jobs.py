@@ -324,6 +324,7 @@ def _update_job(job_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
 
 def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     job_id = str(job.get("id") or "")
+    server_time = _now()
     public = {
         "id": job_id,
         "queue_job_id": job_id,
@@ -338,6 +339,8 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
         "source_filename": job.get("source_filename") or "image",
         "source_url": f"/api/jobs/{job_id}/source" if job_id else None,
         "error": job.get("error"),
+        "server_time": server_time,
+        "elapsed_seconds": _elapsed_seconds(job, server_time),
     }
     if job.get("input"):
         public["input"] = job["input"]
@@ -396,6 +399,26 @@ def _delete_queued_source_unlocked(job_id: str) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _elapsed_seconds(job: dict[str, Any], server_time: str) -> int:
+    start = _parse_time(str(job.get("started_at") or job.get("created_at") or ""))
+    end = _parse_time(str(job.get("finished_at") or server_time))
+    if not start or not end:
+        return 0
+    return max(0, int((end - start).total_seconds()))
+
+
+def _parse_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _safe_filename(filename: str) -> str:

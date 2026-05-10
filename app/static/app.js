@@ -426,20 +426,11 @@ function setStep(index) {
 }
 
 function setBusyStatus(label) {
-  const startedAt = Date.now();
   clearBusyStatus();
   processing.classList.remove("hidden");
   setProgress(8, "Preparing job...");
-  const render = () => {
-    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
-    const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
-    const seconds = String(elapsed % 60).padStart(2, "0");
-    const message = `${label} ${minutes}:${seconds}`;
-    setStatus("Processing...", "busy", "Processing image. Large files may take a little longer.");
-    processingLabel.textContent = message;
-  };
-  render();
-  busyTimer = window.setInterval(render, 1000);
+  setStatus("Processing...", "busy", "Preparing server job.");
+  processingLabel.textContent = label;
 }
 
 function clearBusyStatus() {
@@ -454,6 +445,30 @@ function clearBusyStatus() {
 function setProgress(percent, detail = "") {
   progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   if (detail) processingDetail.textContent = detail;
+}
+
+function formatDuration(totalSeconds) {
+  const elapsed = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+  const hours = Math.floor(elapsed / 3600);
+  const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+  const seconds = String(elapsed % 60).padStart(2, "0");
+  return hours ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
+}
+
+function serverElapsedSeconds(work) {
+  if (Number.isFinite(Number(work?.elapsed_seconds))) return Number(work.elapsed_seconds);
+  const start = Date.parse(work?.started_at || work?.created_at || "");
+  if (!Number.isFinite(start)) return 0;
+  const end = Date.parse(work?.finished_at || work?.server_time || new Date().toISOString());
+  if (!Number.isFinite(end)) return 0;
+  return Math.max(0, Math.floor((end - start) / 1000));
+}
+
+function setServerBusyStatus(label, work, detail) {
+  processing.classList.remove("hidden");
+  const elapsed = serverElapsedSeconds(work);
+  processingLabel.textContent = `${label} ${formatDuration(elapsed)}`;
+  setStatus("Processing", "busy", detail || "Server processing is running. You can close this browser and return later.");
 }
 
 function revoke(url) {
@@ -1847,12 +1862,20 @@ async function loadHistory() {
 
 async function resumeRunningJobs() {
   try {
-    const response = await fetch("/api/jobs?limit=20", { cache: "no-store" });
-    if (!response.ok) return;
-    const body = await response.json();
-    const active = (body.jobs || []).find((job) => ["queued", "running"].includes(job.status));
-    if (active) {
-      resumeQueuedJob(active);
+    const [jobsResponse, batchesResponse] = await Promise.all([
+      fetch("/api/jobs?limit=20", { cache: "no-store" }),
+      fetch("/api/batches?limit=10", { cache: "no-store" }),
+    ]);
+    const jobsBody = jobsResponse.ok ? await jobsResponse.json() : { jobs: [] };
+    const batchesBody = batchesResponse.ok ? await batchesResponse.json() : { batches: [] };
+    const activeJob = (jobsBody.jobs || []).find((job) => ["queued", "running"].includes(job.status));
+    if (activeJob) {
+      resumeQueuedJob(activeJob);
+      return;
+    }
+    const activeBatch = (batchesBody.batches || []).find((batch) => ["queued", "running"].includes(batch.status));
+    if (activeBatch) {
+      resumeBatch(activeBatch);
     }
   } catch {
     // History still loads manually if the lightweight resume check fails.
@@ -1867,6 +1890,11 @@ async function pollBatch(batchId) {
     const done = batch.completed || 0;
     const failed = batch.failed || 0;
     const total = batch.total || 0;
+    setServerBusyStatus(
+      batch.status === "queued" ? "Queued on server" : "Processing batch on server",
+      batch,
+      `Batch ${String(batch.id || batchId).slice(0, 8)}: ${done + failed}/${total} complete. Server elapsed ${formatDuration(serverElapsedSeconds(batch))}.`,
+    );
     setProgress(total ? Math.round(((done + failed) / total) * 100) : 0, `Batch progress: ${done + failed}/${total}`);
     if (batch.status === "completed") return batch;
     await delay(1200);
@@ -1880,6 +1908,11 @@ async function pollQueuedJob(jobId) {
     const job = await response.json();
     const status = job.status || "queued";
     const progress = Number(job.progress || 0);
+    setServerBusyStatus(
+      status === "queued" ? "Queued on server" : "Processing on server",
+      job,
+      `Server job ${String(job.id || jobId).slice(0, 8)}: ${status}. Server elapsed ${formatDuration(serverElapsedSeconds(job))}.`,
+    );
     setProgress(progress, `Server job ${String(job.id || jobId).slice(0, 8)}: ${status}`);
     if (status === "done") return job;
     if (status === "error") throw new Error(job.error || "Server job failed.");
@@ -1893,7 +1926,7 @@ async function resumeQueuedJob(job) {
   currentQueueJobId = jobId;
   setActiveView("workspace");
   runButton.disabled = true;
-  setBusyStatus("Processing on server");
+  setServerBusyStatus("Processing on server", job, `Server job ${String(jobId).slice(0, 8)} is running. You can close this browser and return later.`);
   setStatus("Processing", "busy", `Server job ${String(jobId).slice(0, 8)} is running. You can close this browser and return later.`);
   try {
     const completed = await pollQueuedJob(jobId);
@@ -1903,6 +1936,41 @@ async function resumeQueuedJob(job) {
     setStatus("Complete", "complete", "Server job complete. Your image is ready in History.");
   } catch (error) {
     setStatus("Error", "error", error.message || "Server job failed.");
+    await loadHistory();
+  } finally {
+    clearBusyStatus();
+    runButton.disabled = false;
+    syncRunLabel();
+  }
+}
+
+async function resumeBatch(batch) {
+  const batchId = batch.id;
+  if (!batchId) return;
+  currentBatchId = batchId;
+  setActiveView("workspace");
+  runButton.disabled = true;
+  setServerBusyStatus("Processing batch on server", batch, `Batch ${String(batchId).slice(0, 8)} is running. You can close this browser and return later.`);
+  renderBatchResults(batchToResults(batch), batch);
+  try {
+    const completed = await pollBatch(batchId);
+    const batchItems = completed.items || [];
+    const ok = batchItems.filter((item) => item.status === "done");
+    const failed = batchItems.filter((item) => item.status === "error");
+    renderBatchResults(batchToResults(completed), completed);
+    if (ok[0]?.result_download_url) {
+      openStoredPreview({
+        sourceUrl: ok[0].source_url,
+        resultUrl: ok[0].result_download_url,
+        filename: ok[0].result_filename || ok[0].filename,
+        summary: ok[0].result_filename || "Batch result",
+      });
+    }
+    await loadHistory();
+    await loadDiagnostics();
+    setStatus("Complete", "complete", `Batch complete. ${ok.length} finished, ${failed.length} failed.`);
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Batch job failed.");
     await loadHistory();
   } finally {
     clearBusyStatus();
@@ -2373,7 +2441,12 @@ form.addEventListener("submit", async (event) => {
   let actionLabel = "Enhancing image";
   if (tool === "remove-background") actionLabel = "Removing background";
   if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
-  setBusyStatus(filesToProcess.length > 1 ? `Batch ${actionLabel.toLowerCase()}` : actionLabel);
+  setBusyStatus(filesToProcess.length > 1 ? "Uploading batch to server" : "Uploading image to server");
+  setStatus(
+    "Uploading",
+    "busy",
+    "Keep this page open until the upload is accepted. Once the server job appears, Docker keeps processing without the browser.",
+  );
 
   try {
     const results = [];
@@ -2390,6 +2463,7 @@ form.addEventListener("submit", async (event) => {
       const batch = (await batchResponse.json()).batch;
       currentBatchId = batch.id;
       renderBatchResults(batchToResults(batch), batch);
+      setServerBusyStatus("Queued on server", batch, `Batch ${String(batch.id || "").slice(0, 8)} accepted. You can close this browser and return later.`);
       setStatus("Processing", "busy", "Batch queued on server. You can close this browser and return later.");
       const completed = await pollBatch(batch.id);
       const batchItems = completed.items || [];
@@ -2424,6 +2498,11 @@ form.addEventListener("submit", async (event) => {
     const queuedJob = (await queueResponse.json()).job;
     currentQueueJobId = queuedJob.id;
     renderBatchResults([queuedJobToResult(queuedJob)]);
+    setServerBusyStatus(
+      queuedJob.status === "queued" ? "Queued on server" : `${actionLabel} on server`,
+      queuedJob,
+      `Uploaded to server as job ${String(queuedJob.id || "").slice(0, 8)}. You can close this browser and return later.`,
+    );
     setStatus(
       "Uploaded",
       "busy",

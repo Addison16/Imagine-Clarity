@@ -271,7 +271,10 @@ def _process_one(raw: bytes, filename: str, tool: str, settings: dict[str, Any])
 def _public_batch(batch: dict[str, Any]) -> dict[str, Any]:
     redacted = dict(batch)
     batch_id = str(redacted.get("id") or "")
+    server_time = datetime.now(timezone.utc).isoformat()
     redacted["zip_url"] = f"/api/batches/{batch_id}/zip" if batch_id else None
+    redacted["server_time"] = server_time
+    redacted["elapsed_seconds"] = _elapsed_seconds(redacted, server_time)
     redacted.pop("settings", None)
     items: list[dict[str, Any]] = []
     for item in batch.get("items", []):
@@ -283,3 +286,23 @@ def _public_batch(batch: dict[str, Any]) -> dict[str, Any]:
         items.append(clean)
     redacted["items"] = items
     return redacted
+
+
+def _elapsed_seconds(batch: dict[str, Any], server_time: str) -> int:
+    start = _parse_time(str(batch.get("started_at") or batch.get("created_at") or ""))
+    end = _parse_time(str(batch.get("finished_at") or server_time))
+    if not start or not end:
+        return 0
+    return max(0, int((end - start).total_seconds()))
+
+
+def _parse_time(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
