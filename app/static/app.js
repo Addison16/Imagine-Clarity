@@ -28,6 +28,7 @@ const infoPanels = document.querySelectorAll(".info-panel");
 const steps = document.querySelectorAll(".step");
 const beforeImg = document.querySelector("#before");
 const afterImg = document.querySelector("#after");
+const beforeStage = document.querySelector("#before-stage");
 const beforeMeta = document.querySelector("#before-meta");
 const afterMeta = document.querySelector("#after-meta");
 const beforeEmpty = document.querySelector("#before-empty");
@@ -466,6 +467,48 @@ function absoluteUrl(url) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasFileDrag(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+function bindImageDropTarget(element) {
+  if (!element) return;
+  let dragDepth = 0;
+
+  element.addEventListener("dragenter", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth += 1;
+    element.classList.add("dragging");
+  });
+
+  element.addEventListener("dragover", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    element.classList.add("dragging");
+  });
+
+  element.addEventListener("dragleave", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) element.classList.remove("dragging");
+  });
+
+  element.addEventListener("drop", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragDepth = 0;
+    element.classList.remove("dragging");
+    setFiles(event.dataTransfer.files);
+  });
 }
 
 function formatBytes(bytes) {
@@ -2181,20 +2224,8 @@ previewBgButtons.forEach((button) => {
   button.addEventListener("click", () => setPreviewBackground(button.dataset.previewBg));
 });
 
-dropzone.addEventListener("dragover", (event) => {
-  event.preventDefault();
-  dropzone.classList.add("dragging");
-});
-
-dropzone.addEventListener("dragleave", () => {
-  dropzone.classList.remove("dragging");
-});
-
-dropzone.addEventListener("drop", (event) => {
-  event.preventDefault();
-  dropzone.classList.remove("dragging");
-  setFiles(event.dataTransfer.files);
-});
+bindImageDropTarget(dropzone);
+bindImageDropTarget(beforeStage);
 
 function endpointForTool(tool) {
   if (tool === "remove-background") return "/api/remove-background";

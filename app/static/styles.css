@@ -1141,6 +1141,36 @@ body:not(.pro-mode) .advanced {
     -12px 0;
 }
 
+.upload-preview-stage {
+  cursor: copy;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.upload-preview-stage.dragging {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(79, 124, 255, 0.16);
+  transform: translateY(-1px);
+}
+
+.upload-preview-stage.dragging::after {
+  content: "Drop to upload";
+  position: absolute;
+  inset: 12px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  border: 2px dashed rgba(79, 124, 255, 0.75);
+  border-radius: 8px;
+  background: rgba(248, 250, 252, 0.82);
+  color: var(--accent-hover);
+  font-size: 14px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
 .preview-stage.bg-white {
   background: #ffffff;
 }
