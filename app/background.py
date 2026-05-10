@@ -66,6 +66,7 @@ class BackgroundResult:
 def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResult:
     options = _normalize_options(options)
     source_img = Image.open(io.BytesIO(raw)).convert("RGBA")
+    has_fake_checkerboard = _detect_fake_checkerboard_background(source_img) is not None
 
     if options.respect_existing_alpha and _has_existing_cutout(source_img):
         refinements = _active_refinements(options)
@@ -84,13 +85,18 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
         )
 
     if options.model == "logo" or (
-        options.model == "auto" and _should_use_edge_color_cut(source_img, options.background_tolerance)
+        options.model == "auto"
+        and not has_fake_checkerboard
+        and _should_use_edge_color_cut(source_img, options.background_tolerance)
     ):
         img = _edge_color_cutout(source_img, options)
+        img, checkerboard_cleanup = _apply_checkerboard_leak_cleanup(source_img, img)
         img = _apply_alpha_refinements(img, options)
         encoded, extension, media_type = _encode(img, options.output_format)
         engine = "edge-color safe cut (CPU)"
         refinements = _active_refinements(options)
+        if checkerboard_cleanup:
+            refinements = ["checkerboard leak cleanup", *refinements]
         if refinements:
             engine = f"{engine} + {', '.join(refinements)}"
         return BackgroundResult(
@@ -108,7 +114,7 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
     except Exception as exc:
         raise RuntimeError("The background-removal dependencies are not available. Rebuild the Docker image.") from exc
 
-    model_name = "isnet-general-use" if options.model == "auto" else BACKGROUND_MODELS[options.model]
+    model_name = _resolve_background_model_name(options.model, has_fake_checkerboard)
     provider_key = ",".join(providers)
     with _cache_lock:
         session = _session_cache.get(f"{model_name}:{provider_key}")
@@ -135,11 +141,14 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
     img = Image.open(io.BytesIO(result)).convert("RGBA")
     if options.preserve_interior:
         img = _preserve_interior_alpha(img, source_img)
+    img, checkerboard_cleanup = _apply_checkerboard_leak_cleanup(source_img, img)
     img = _apply_alpha_refinements(img, options)
     encoded, extension, media_type = _encode(img, options.output_format)
     active_providers = getattr(getattr(session, "inner_session", None), "get_providers", lambda: providers)()
     engine = f"{model_name} ({active_providers[0]})"
     refinements = _active_refinements(options)
+    if checkerboard_cleanup:
+        refinements = ["checkerboard leak cleanup", *refinements]
     if refinements:
         engine = f"{engine} + {', '.join(refinements)}"
     return BackgroundResult(
@@ -150,6 +159,12 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
         media_type=media_type,
         engine=engine,
     )
+
+
+def _resolve_background_model_name(model: str, has_fake_checkerboard: bool) -> str:
+    if model == "auto":
+        return "birefnet-general-lite" if has_fake_checkerboard else "isnet-general-use"
+    return BACKGROUND_MODELS[model]
 
 
 def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
@@ -238,6 +253,97 @@ def _should_use_edge_color_cut(img: Image.Image, tolerance: int) -> bool:
     quantized = (small_arr // 32).reshape(-1, 3)
     unique_bins = len({tuple(pixel) for pixel in quantized})
     return unique_bins <= 220
+
+
+def _detect_fake_checkerboard_background(img: Image.Image) -> tuple[Any, Any] | None:
+    import numpy as np
+    from collections import Counter
+
+    arr = np.array(img.convert("RGBA"))
+    rgb = arr[:, :, :3].astype("int16")
+    alpha = arr[:, :, 3]
+
+    edge_rgb = _edge_pixels(rgb)
+    edge_alpha = _edge_pixels(alpha)
+    visible_edge = edge_alpha > 16
+    if int(visible_edge.sum()) < 64:
+        return None
+
+    edge_rgb = edge_rgb[visible_edge]
+    channel_range = edge_rgb.max(axis=1) - edge_rgb.min(axis=1)
+    brightness = edge_rgb.mean(axis=1)
+    neutral_light = (brightness >= 220) & (channel_range <= 24)
+    if float(neutral_light.mean()) < 0.45:
+        return None
+
+    quantized = (edge_rgb[neutral_light] // 8) * 8
+    common = Counter(map(tuple, quantized.tolist())).most_common(2)
+    if len(common) < 2:
+        return None
+
+    (first_color, first_count), (second_color, second_count) = common
+    if second_count < max(48, first_count * 0.22):
+        return None
+
+    color_a = np.array(first_color, dtype="float32") + 4
+    color_b = np.array(second_color, dtype="float32") + 4
+    color_delta = float(np.sqrt(np.sum((color_a - color_b) ** 2)))
+    if color_delta < 4 or color_delta > 34:
+        return None
+
+    return color_a, color_b
+
+
+def _apply_checkerboard_leak_cleanup(source_img: Image.Image, img: Image.Image) -> tuple[Image.Image, bool]:
+    colors = _detect_fake_checkerboard_background(source_img)
+    if colors is None:
+        return img, False
+
+    import cv2
+    import numpy as np
+
+    if source_img.size != img.size:
+        source_img = source_img.resize(img.size, Image.Resampling.LANCZOS)
+
+    source_arr = np.array(source_img.convert("RGBA"))
+    result_arr = np.array(img.convert("RGBA"))
+    rgb = source_arr[:, :, :3].astype("float32")
+    alpha = result_arr[:, :, 3]
+
+    distances = [
+        np.sqrt(np.sum((rgb - color.reshape(1, 1, 3)) ** 2, axis=2))
+        for color in colors
+    ]
+    distance = np.minimum(distances[0], distances[1])
+    channel_range = rgb.max(axis=2) - rgb.min(axis=2)
+    brightness = rgb.mean(axis=2)
+
+    # Only target pure light-gray checkerboard chunks. Cream shirt art, white text,
+    # water highlights, and distress speckles usually have warmer tint or smaller islands.
+    candidate = (distance <= 16) & (channel_range <= 14) & (brightness >= 230) & (alpha > 8)
+    if int(candidate.sum()) < 128:
+        return img, False
+
+    count, labels, stats, _centroids = cv2.connectedComponentsWithStats(candidate.astype("uint8"), 8)
+    if count <= 1:
+        return img, False
+
+    height, width = candidate.shape
+    large_leak_area = max(512, int(width * height * 0.0035))
+    remove = np.zeros(candidate.shape, dtype=bool)
+
+    for label in range(1, count):
+        x, y, comp_width, comp_height, area = stats[label]
+        touches_canvas_edge = x == 0 or y == 0 or x + comp_width >= width or y + comp_height >= height
+        if touches_canvas_edge or area >= large_leak_area:
+            remove |= labels == label
+
+    if not remove.any():
+        return img, False
+
+    cleaned = result_arr.copy()
+    cleaned[:, :, 3][remove] = 0
+    return Image.fromarray(cleaned, mode="RGBA"), True
 
 
 def _edge_color_cutout(source_img: Image.Image, options: BackgroundOptions) -> Image.Image:
