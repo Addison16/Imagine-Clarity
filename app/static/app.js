@@ -123,6 +123,7 @@ let differenceKey = "";
 let differenceToken = 0;
 let historyPreviewEnabled = false;
 let currentBatchId = null;
+let currentQueueJobId = null;
 let historyJobsCache = [];
 let historyBatchesCache = [];
 
@@ -461,6 +462,10 @@ function revoke(url) {
 function absoluteUrl(url) {
   if (!url) return "";
   return new URL(url, window.location.origin).href;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatBytes(bytes) {
@@ -1300,6 +1305,47 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   document.querySelector(".result-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function jobSummary(job) {
+  const output = job.output || {};
+  const format = String(output.format || outputFormat.value || "png").toUpperCase();
+  if (output.width && output.height) {
+    return `${output.width} x ${output.height} ${format}${output.size_bytes ? ` | ${formatBytes(output.size_bytes)}` : ""}`;
+  }
+  return `Status: ${job.status || "queued"}${Number.isFinite(job.progress) ? ` | ${job.progress}%` : ""}`;
+}
+
+function queuedJobToResult(job) {
+  const done = job.status === "done" && Boolean(job.download_url);
+  return {
+    ok: done,
+    pending: !done && job.status !== "error",
+    status: job.status || "queued",
+    name: job.source_filename || job.filename || `Job ${String(job.id || "").slice(0, 8)}`,
+    summary: done ? job.filename || jobSummary(job) : jobSummary(job),
+    error: job.error || "Failed",
+    downloadUrl: job.download_url || "",
+    sourceUrl: job.source_download_url || job.source_url || "",
+    filename: job.filename || job.source_filename,
+  };
+}
+
+function showQueuedJobResult(job) {
+  if (!job?.download_url) throw new Error("Queued job finished without a result URL.");
+  openStoredPreview({
+    sourceUrl: job.source_download_url || job.source_url,
+    resultUrl: job.download_url,
+    filename: job.filename || "result.png",
+    summary: jobSummary(job),
+    compare: true,
+  });
+  if (job.engine) {
+    engineChip.textContent = job.engine;
+    engineChip.className = `mini-badge ${String(job.engine).includes("CUDA") ? "good" : ""}`.trim();
+    engineChip.classList.remove("hidden");
+  }
+  return queuedJobToResult(job);
+}
+
 function batchToResults(batch) {
   return (batch.items || []).map((item) => {
     const done = item.status === "done";
@@ -1463,6 +1509,8 @@ function historySearchTextForJob(job) {
     job.filename,
     job.source_filename,
     job.tool,
+    job.status,
+    job.queue_job_id,
     output.format,
     output.width,
     output.height,
@@ -1635,66 +1683,103 @@ function renderHistory(jobs, batches = []) {
     const row = document.createElement("div");
     row.className = "job-row";
     row.dataset.historyKey = jobKey;
+    const status = job.status || (job.download_url ? "done" : "queued");
+    const isDone = status === "done" || status === "completed";
+    const canDownload = Boolean(job.download_url);
     const copy = document.createElement("div");
     const title = document.createElement("strong");
     title.textContent = job.filename || job.source_filename || "Processed image";
     title.title = job.filename || job.source_filename || "Processed image";
     const meta = document.createElement("span");
     const output = job.output || {};
-    meta.textContent =
-      `${toolLabel(job.tool)} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`;
+    meta.textContent = canDownload
+      ? `${toolLabel(job.tool)} | ${output.width || "?"} x ${output.height || "?"} ${String(output.format || "").toUpperCase()} | ${formatBytes(output.size_bytes || 0)} | ${formatDate(job.created_at)}`
+      : `${toolLabel(job.tool)} | ${status} | ${Number(job.progress || 0)}% | ${formatDate(job.created_at)}`;
     const statusLine = document.createElement("div");
     statusLine.className = "history-meta-line";
-    statusLine.append(historyStatusBadge("completed"), meta);
+    statusLine.append(historyStatusBadge(status), meta);
     copy.append(title, statusLine);
     if (historyPreviewEnabled && job.download_url) {
       copy.append(makePreviewThumbs(job.source_download_url, job.download_url, job.filename || job.source_filename || "Processed image"));
     }
-    const link = document.createElement("a");
-    link.href = job.download_url;
-    link.download = job.filename || "result.png";
-    link.textContent = "Download";
     const actions = document.createElement("div");
     actions.className = "job-actions";
-    const previewButton = document.createElement("button");
-    previewButton.className = "small-button";
-    previewButton.type = "button";
-    previewButton.textContent = "Open in Viewer";
-    previewButton.setAttribute("aria-label", `Preview ${job.filename || job.source_filename || "processed image"}`);
-    previewButton.addEventListener("click", () => {
-      highlightHistorySelection(jobKey);
-      openStoredPreview({
-        sourceUrl: job.source_download_url,
-        resultUrl: job.download_url,
-        filename: job.filename || "result.png",
-        summary: meta.textContent,
-      });
-    });
-    actions.append(previewButton);
-    if (job.source_download_url) {
-      const compareButton = document.createElement("button");
-      compareButton.className = "small-button";
-      compareButton.type = "button";
-      compareButton.textContent = "Compare";
-      compareButton.setAttribute("aria-label", `Compare ${job.filename || job.source_filename || "processed image"}`);
-      compareButton.addEventListener("click", () => {
+    if (canDownload) {
+      const link = document.createElement("a");
+      link.href = job.download_url;
+      link.download = job.filename || "result.png";
+      link.textContent = "Download";
+      const previewButton = document.createElement("button");
+      previewButton.className = "small-button";
+      previewButton.type = "button";
+      previewButton.textContent = "Open in Viewer";
+      previewButton.setAttribute("aria-label", `Preview ${job.filename || job.source_filename || "processed image"}`);
+      previewButton.addEventListener("click", () => {
         highlightHistorySelection(jobKey);
         openStoredPreview({
           sourceUrl: job.source_download_url,
           resultUrl: job.download_url,
           filename: job.filename || "result.png",
           summary: meta.textContent,
-          compare: true,
         });
       });
-      actions.append(compareButton);
+      actions.append(previewButton);
+      if (job.source_download_url) {
+        const compareButton = document.createElement("button");
+        compareButton.className = "small-button";
+        compareButton.type = "button";
+        compareButton.textContent = "Compare";
+        compareButton.setAttribute("aria-label", `Compare ${job.filename || job.source_filename || "processed image"}`);
+        compareButton.addEventListener("click", () => {
+          highlightHistorySelection(jobKey);
+          openStoredPreview({
+            sourceUrl: job.source_download_url,
+            resultUrl: job.download_url,
+            filename: job.filename || "result.png",
+            summary: meta.textContent,
+            compare: true,
+          });
+        });
+        actions.append(compareButton);
+      }
+      actions.append(link);
+    } else if (status === "error" && job.queue_job_id) {
+      const retryButton = document.createElement("button");
+      retryButton.className = "small-button";
+      retryButton.type = "button";
+      retryButton.textContent = "Retry";
+      retryButton.addEventListener("click", async () => {
+        try {
+          const response = await fetch(`/api/jobs/${encodeURIComponent(job.queue_job_id)}/retry`, { method: "POST" });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || body.detail || `Retry failed with ${response.status}`);
+          }
+          const queued = (await response.json()).job;
+          setStatus("Processing", "busy", `Retry queued on server as ${String(queued.id || "").slice(0, 8)}.`);
+          await loadHistory();
+          resumeQueuedJob(queued);
+        } catch (error) {
+          setStatus("Error", "error", error.message || "Could not retry job.");
+        }
+      });
+      actions.append(retryButton);
+    } else if (!isDone) {
+      const resumeButton = document.createElement("button");
+      resumeButton.className = "small-button";
+      resumeButton.type = "button";
+      resumeButton.textContent = "Watch";
+      resumeButton.addEventListener("click", () => resumeQueuedJob(job));
+      actions.append(resumeButton);
     }
     const deleteButton = document.createElement("button");
     deleteButton.className = "small-button danger-button";
     deleteButton.type = "button";
     deleteButton.textContent = "Delete";
+    deleteButton.disabled = status === "running";
+    deleteButton.title = status === "running" ? "Running server jobs can be deleted after they finish or fail." : "Delete this history item";
     deleteButton.addEventListener("click", () => deleteSavedJob(job));
-    actions.append(link, deleteButton);
+    actions.append(deleteButton);
     row.append(copy, actions);
     historyList.append(row);
   });
@@ -1717,6 +1802,20 @@ async function loadHistory() {
   }
 }
 
+async function resumeRunningJobs() {
+  try {
+    const response = await fetch("/api/jobs?limit=20", { cache: "no-store" });
+    if (!response.ok) return;
+    const body = await response.json();
+    const active = (body.jobs || []).find((job) => ["queued", "running"].includes(job.status));
+    if (active) {
+      resumeQueuedJob(active);
+    }
+  } catch {
+    // History still loads manually if the lightweight resume check fails.
+  }
+}
+
 async function pollBatch(batchId) {
   while (true) {
     const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`, { cache: "no-store" });
@@ -1727,7 +1826,45 @@ async function pollBatch(batchId) {
     const total = batch.total || 0;
     setProgress(total ? Math.round(((done + failed) / total) * 100) : 0, `Batch progress: ${done + failed}/${total}`);
     if (batch.status === "completed") return batch;
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    await delay(1200);
+  }
+}
+
+async function pollQueuedJob(jobId) {
+  while (true) {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Job status failed");
+    const job = await response.json();
+    const status = job.status || "queued";
+    const progress = Number(job.progress || 0);
+    setProgress(progress, `Server job ${String(job.id || jobId).slice(0, 8)}: ${status}`);
+    if (status === "done") return job;
+    if (status === "error") throw new Error(job.error || "Server job failed.");
+    await delay(1200);
+  }
+}
+
+async function resumeQueuedJob(job) {
+  const jobId = job.queue_job_id || job.id;
+  if (!jobId) return;
+  currentQueueJobId = jobId;
+  setActiveView("workspace");
+  runButton.disabled = true;
+  setBusyStatus("Processing on server");
+  setStatus("Processing", "busy", `Server job ${String(jobId).slice(0, 8)} is running. You can close this browser and return later.`);
+  try {
+    const completed = await pollQueuedJob(jobId);
+    showQueuedJobResult(completed);
+    await loadHistory();
+    await loadDiagnostics();
+    setStatus("Complete", "complete", "Server job complete. Your image is ready in History.");
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Server job failed.");
+    await loadHistory();
+  } finally {
+    clearBusyStatus();
+    runButton.disabled = false;
+    syncRunLabel();
   }
 }
 
@@ -2208,7 +2345,6 @@ form.addEventListener("submit", async (event) => {
   setBusyStatus(filesToProcess.length > 1 ? `Batch ${actionLabel.toLowerCase()}` : actionLabel);
 
   try {
-    const endpoint = endpointForTool(tool);
     const results = [];
 
     if (filesToProcess.length > 1) {
@@ -2243,43 +2379,29 @@ form.addEventListener("submit", async (event) => {
       return;
     }
 
-    for (let index = 0; index < filesToProcess.length; index += 1) {
-      const file = filesToProcess[index];
-      const size = index === 0 && selectedImageSize ? selectedImageSize : await imageSizeForFile(file);
-      setProgress(
-        Math.round((index / filesToProcess.length) * 100),
-        `Processing ${index + 1} of ${filesToProcess.length}: ${file.name}`,
-      );
-      const response = await fetch(endpoint, {
-        method: "POST",
-        body: buildPayload(file, size),
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        results.push({
-          ok: false,
-          name: file.name,
-          error: body.error || `Request failed with ${response.status}`,
-        });
-        continue;
-      }
-
-      const blob = await response.blob();
-      const shown = showResult(blob, response, `${file.name}-result.${outputFormat.value}`);
-      const item = {
-        ok: true,
-        name: file.name,
-        ...shown,
-      };
-      results.push(item);
-      setProgress(
-        Math.round(((index + 1) / filesToProcess.length) * 100),
-        `Finished ${index + 1} of ${filesToProcess.length}`,
-      );
+    const file = filesToProcess[0];
+    const size = selectedImageSize || await imageSizeForFile(file);
+    setProgress(10, `Uploading ${file.name} to the server queue...`);
+    const queueResponse = await fetch("/api/jobs/queue", {
+      method: "POST",
+      body: buildPayload(file, size),
+    });
+    if (!queueResponse.ok) {
+      const body = await queueResponse.json().catch(() => ({}));
+      throw new Error(body.error || body.detail || `Queue failed with ${queueResponse.status}`);
     }
-
-    renderBatchResults(filesToProcess.length > 1 ? results : []);
+    const queuedJob = (await queueResponse.json()).job;
+    currentQueueJobId = queuedJob.id;
+    renderBatchResults([queuedJobToResult(queuedJob)]);
+    setStatus(
+      "Uploaded",
+      "busy",
+      `Uploaded to server as job ${String(queuedJob.id || "").slice(0, 8)}. You can close this browser and return later.`,
+    );
+    const completedJob = await pollQueuedJob(queuedJob.id);
+    const shown = showQueuedJobResult(completedJob);
+    results.push({ ok: true, name: file.name, ...shown });
+    renderBatchResults([]);
     await loadHistory();
     await loadDiagnostics();
 
@@ -2332,3 +2454,4 @@ syncPresetCards();
 syncSizingUi();
 syncToolUi();
 loadRuntime();
+resumeRunningJobs();

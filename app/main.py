@@ -35,6 +35,16 @@ from app.jobs import (
     storage_summary,
 )
 from app.batch_jobs import batch_source_path, build_batch_zip, create_batch, get_batch, list_batches, retry_batch
+from app.queued_jobs import (
+    clear_queued_jobs,
+    create_queued_job,
+    delete_queued_job,
+    get_queued_job,
+    list_queued_jobs,
+    queued_source_path,
+    retry_queued_job,
+    start_queued_workers,
+)
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, resolve_upscale_sizes, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -70,6 +80,11 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.on_event("startup")
+def startup_queued_jobs() -> None:
+    start_queued_workers()
+
+
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
@@ -96,7 +111,136 @@ def health() -> dict[str, object]:
 @app.get("/api/jobs")
 def api_jobs(limit: int = 25, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_api_key(x_api_key, authorization)
-    return {"jobs": list_jobs(limit)}
+    safe_limit = max(1, min(int(limit), HISTORY_LIMIT))
+    queued = list_queued_jobs(safe_limit, include_done=False)
+    completed = [_completed_job_status(job) for job in list_jobs(safe_limit)]
+    jobs = sorted(queued + completed, key=lambda job: str(job.get("created_at") or ""), reverse=True)
+    return {"jobs": jobs[:safe_limit]}
+
+
+@app.post("/api/jobs/queue")
+async def api_queue_job(
+    image: UploadFile = File(...),
+    tool: str = Form("upscale"),
+    scale: float = Form(4.0),
+    mode: str = Form("auto"),
+    face_enhance: bool = Form(False),
+    denoise: float = Form(0.55),
+    tile: int = Form(512),
+    device: str = Form("auto"),
+    output_format: str = Form("png"),
+    target_width: int | None = Form(None),
+    target_height: int | None = Form(None),
+    resize_method: str = Form("lanczos"),
+    target_fit: str = Form("stretch"),
+    canvas_width: int | None = Form(None),
+    canvas_height: int | None = Form(None),
+    canvas_anchor: str = Form("center"),
+    dpi: int | None = Form(None),
+    export_quality: int = Form(95),
+    sharpen_amount: int = Form(70),
+    model: str = Form("auto"),
+    cut_mode: str = Form("balanced"),
+    alpha_matting: bool = Form(True),
+    edge_refine: int = Form(8),
+    edge_trim: int = Form(0),
+    fringe_cleanup: int = Form(0),
+    inner_cleanup: int = Form(0),
+    background_tolerance: int = Form(34),
+    post_process_mask: bool = Form(True),
+    preserve_interior: bool = Form(True),
+    respect_existing_alpha: bool = Form(True),
+    upscale_device: str = Form("auto"),
+    background_device: str = Form("auto"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    raw, metadata = await _read_validated_upload(image)
+    normalized_tool = _normalize_tool(tool)
+    try:
+        settings = _build_tool_settings(
+            normalized_tool=normalized_tool,
+            metadata=metadata,
+            scale=scale,
+            mode=mode,
+            face_enhance=face_enhance,
+            denoise=denoise,
+            tile=tile,
+            device=device,
+            output_format=output_format,
+            target_width=target_width,
+            target_height=target_height,
+            resize_method=resize_method,
+            target_fit=target_fit,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor,
+            dpi=dpi,
+            export_quality=export_quality,
+            sharpen_amount=sharpen_amount,
+            model=model,
+            cut_mode=cut_mode,
+            alpha_matting=alpha_matting,
+            edge_refine=edge_refine,
+            edge_trim=edge_trim,
+            fringe_cleanup=fringe_cleanup,
+            inner_cleanup=inner_cleanup,
+            background_tolerance=background_tolerance,
+            post_process_mask=post_process_mask,
+            preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha,
+            upscale_device=upscale_device,
+            background_device=background_device,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    job = create_queued_job(
+        filename=image.filename or "image.png",
+        data=raw,
+        input_metadata=metadata,
+        tool=normalized_tool,
+        settings=settings,
+    )
+    return JSONResponse(status_code=202, content={"job": job})
+
+
+@app.get("/api/jobs/{job_id}/source")
+def api_queued_source(job_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> FileResponse:
+    _require_api_key(x_api_key, authorization)
+    path = queued_source_path(job_id)
+    if not path:
+        raise HTTPException(status_code=404, detail="Queued source image not found.")
+    return FileResponse(path, filename=path.name)
+
+
+@app.get("/api/jobs/{job_id}")
+def api_job_status(job_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    queued = get_queued_job(job_id)
+    if queued:
+        return queued
+    completed = get_job(job_id)
+    if completed:
+        return _completed_job_status(completed)
+    raise HTTPException(status_code=404, detail="Job not found.")
+
+
+@app.post("/api/jobs/{job_id}/retry")
+def api_retry_job(job_id: str, x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    job = retry_queued_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Queued job not found or source is unavailable.")
+    return JSONResponse(status_code=202, content={"job": job})
+
+
+def _completed_job_status(job: dict[str, object]) -> dict[str, object]:
+    done = dict(job)
+    done["status"] = "done"
+    done["progress"] = 100
+    done["kind"] = "completed"
+    return done
 
 
 @app.get("/api/batches")
@@ -228,11 +372,23 @@ def api_retry_batch(
 
 @app.delete("/api/jobs")
 def api_clear_jobs() -> dict[str, object]:
-    return clear_jobs()
+    completed = clear_jobs()
+    queued = clear_queued_jobs()
+    return {
+        "deleted": True,
+        "deleted_jobs": int(completed.get("deleted_jobs", 0)) + int(queued.get("deleted_jobs", 0)),
+        "deleted_files": int(completed.get("deleted_files", 0)) + int(queued.get("deleted_jobs", 0)),
+        "kept_running": queued.get("kept_running", 0),
+    }
 
 
 @app.delete("/api/jobs/{job_id}")
 def api_delete_job(job_id: str) -> dict[str, object]:
+    queued = delete_queued_job(job_id)
+    if queued is not None:
+        if not queued.get("deleted"):
+            raise HTTPException(status_code=409, detail="This job is running and cannot be deleted yet.")
+        return queued
     result = delete_job(job_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Saved job not found.")
@@ -288,6 +444,13 @@ def api_capabilities() -> dict[str, object]:
             "zip_downloads": True,
             "server_background_processing": True,
         },
+        "queue": {
+            "single_image_jobs": True,
+            "server_background_processing": True,
+            "statuses": ["queued", "running", "done", "error"],
+            "source_downloads": True,
+            "retry_failed": True,
+        },
         "upscale": {
             "modes": ["auto", "photo", "general", "anime", "conservative"],
             "resize_methods": ["nearest", "bilinear", "bicubic", "lanczos", "mitchell", "preserve"],
@@ -313,6 +476,133 @@ def api_capabilities() -> dict[str, object]:
         },
         "security": {"api_key_enabled": bool(API_KEY)},
     }
+
+
+def _build_tool_settings(
+    *,
+    normalized_tool: str,
+    metadata: dict[str, object],
+    scale: float,
+    mode: str,
+    face_enhance: bool,
+    denoise: float,
+    tile: int,
+    device: str,
+    output_format: str,
+    target_width: int | None,
+    target_height: int | None,
+    resize_method: str,
+    target_fit: str,
+    canvas_width: int | None,
+    canvas_height: int | None,
+    canvas_anchor: str,
+    dpi: int | None,
+    export_quality: int,
+    sharpen_amount: int,
+    model: str,
+    cut_mode: str,
+    alpha_matting: bool,
+    edge_refine: int,
+    edge_trim: int,
+    fringe_cleanup: int,
+    inner_cleanup: int,
+    background_tolerance: int,
+    post_process_mask: bool,
+    preserve_interior: bool,
+    respect_existing_alpha: bool,
+    upscale_device: str,
+    background_device: str,
+) -> dict[str, object]:
+    if normalized_tool == "remove-background":
+        return vars(
+            BackgroundOptions(
+                model=model,
+                cut_mode=cut_mode,
+                alpha_matting=alpha_matting,
+                edge_refine=edge_refine,
+                edge_trim=edge_trim,
+                fringe_cleanup=fringe_cleanup,
+                inner_cleanup=inner_cleanup,
+                background_tolerance=background_tolerance,
+                device=device,
+                post_process_mask=post_process_mask,
+                preserve_interior=preserve_interior,
+                respect_existing_alpha=respect_existing_alpha,
+                output_format=output_format,
+            )
+        )
+
+    if normalized_tool == "remove-background-upscale":
+        normalized_format = output_format.lower().strip()
+        if normalized_format == "jpg":
+            normalized_format = "jpeg"
+        if normalized_format == "tif":
+            normalized_format = "tiff"
+        if normalized_format not in (SUPPORTED_FORMATS - {"jpeg", "jpg"}):
+            raise ValueError("All-in-one output format must be png, webp, or tiff so transparency is preserved.")
+
+        upscale_options = UpscaleOptions(
+            scale=scale,
+            mode=mode,
+            face_enhance=face_enhance,
+            denoise=denoise,
+            tile=tile,
+            device=upscale_device,
+            output_format=normalized_format,
+            target_width=target_width,
+            target_height=target_height,
+            resize_method=resize_method,
+            target_fit=target_fit,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor,
+            dpi=dpi,
+            export_quality=export_quality,
+            sharpen_amount=sharpen_amount,
+        )
+        _validate_upscale_resolution(metadata, upscale_options)
+        return {
+            "background": vars(
+                BackgroundOptions(
+                    model=model,
+                    cut_mode=cut_mode,
+                    alpha_matting=alpha_matting,
+                    edge_refine=edge_refine,
+                    edge_trim=edge_trim,
+                    fringe_cleanup=fringe_cleanup,
+                    inner_cleanup=inner_cleanup,
+                    background_tolerance=background_tolerance,
+                    device=background_device,
+                    post_process_mask=post_process_mask,
+                    preserve_interior=preserve_interior,
+                    respect_existing_alpha=respect_existing_alpha,
+                    output_format="png",
+                )
+            ),
+            "upscale": vars(upscale_options),
+        }
+
+    upscale_options = UpscaleOptions(
+        scale=scale,
+        mode=mode,
+        face_enhance=face_enhance,
+        denoise=denoise,
+        tile=tile,
+        device=device,
+        output_format=output_format,
+        target_width=target_width,
+        target_height=target_height,
+        resize_method=resize_method,
+        target_fit=target_fit,
+        canvas_width=canvas_width,
+        canvas_height=canvas_height,
+        canvas_anchor=canvas_anchor,
+        dpi=dpi,
+        export_quality=export_quality,
+        sharpen_amount=sharpen_amount,
+    )
+    _validate_upscale_resolution(metadata, upscale_options)
+    return vars(upscale_options)
 
 
 def _require_api_key(x_api_key: str | None, authorization: str | None = None) -> None:

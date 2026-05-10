@@ -78,7 +78,7 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Illustration/anime`: RealESRGAN_x4plus_anime_6B for flat colors and drawn line work.
 - `Face restore`: optional GFPGAN pass for low-quality faces.
 - `Conservative`: alpha-aware Lanczos plus mild sharpening when exact geometry, text, transparent PNGs, or logos matter more than generated texture.
-- `Remove Back Ground`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
+- `Remove Background`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
 - `Batch processing`: select multiple images and the server runs them in the background one at a time. Closing the browser does not cancel the queued batch.
 - `Batch ZIP downloads`: completed batch outputs can be downloaded together as one ZIP file, with per-image result links still available.
@@ -229,6 +229,42 @@ The JSON response includes `job_id`, `download_url`, `relative_download_url`, an
 
 ```powershell
 curl.exe -L http://localhost:8794/api/results/JOB_ID --output result.png
+```
+
+Server-side queued single-image processing:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/jobs/queue `
+  -F "image=@input.png" `
+  -F "tool=remove-background-upscale" `
+  -F "model=auto" `
+  -F "cut_mode=balanced" `
+  -F "scale=4" `
+  -F "mode=auto" `
+  -F "target_width=4500" `
+  -F "target_height=5400" `
+  -F "target_fit=pad" `
+  -F "output_format=png"
+```
+
+This returns `202 Accepted` immediately with a queue job ID. The image source is stored first, the Docker worker keeps processing even if the browser or caller disconnects, and the completed output appears in History.
+
+Poll status:
+
+```powershell
+curl.exe http://localhost:8794/api/jobs/QUEUE_JOB_ID
+```
+
+Download the uploaded source while the job is queued or running:
+
+```powershell
+curl.exe -L http://localhost:8794/api/jobs/QUEUE_JOB_ID/source --output original.png
+```
+
+Retry a queued job that failed:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/jobs/QUEUE_JOB_ID/retry
 ```
 
 Valid `tool` values for `/api/process`:
@@ -396,6 +432,8 @@ curl.exe -X POST http://localhost:8794/api/process `
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
 - `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
 - `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
+- `QUEUE_HISTORY_LIMIT`: number of queued single-image job records kept, default `100`.
+- `QUEUE_WORKERS`: number of server-side single-image worker threads, default `1`.
 - `BATCH_HISTORY_LIMIT`: number of saved batch records kept in the JSON history, default `50`.
 - `JOB_TTL_HOURS`: optional auto-cleanup window for saved jobs/results. `0` disables TTL cleanup (default).
 - `CLARITY_API_KEY`: optional API key for `/api/process`. If set, callers must send `X-API-Key: <value>` or `Authorization: Bearer <value>`.
