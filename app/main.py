@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import hmac
+import json
 import logging
 import os
 import re
@@ -14,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
+from sse_starlette.sse import EventSourceResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.background import (
@@ -43,8 +46,8 @@ from app.queued_jobs import (
     list_queued_jobs,
     queued_source_path,
     retry_queued_job,
-    start_queued_workers,
 )
+from app.job_queue import event_channel, now as queue_now, queue_health, redis_client, snapshot as queue_snapshot
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, resolve_upscale_sizes, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -78,11 +81,6 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-
-@app.on_event("startup")
-def startup_queued_jobs() -> None:
-    start_queued_workers()
 
 
 @app.get("/", include_in_schema=False)
@@ -235,10 +233,63 @@ def api_retry_job(job_id: str, x_api_key: str | None = Header(default=None), aut
     return JSONResponse(status_code=202, content={"job": job})
 
 
+@app.get("/api/events")
+async def api_events(
+    request: Request,
+    job_id: str | None = None,
+    batch_id: str | None = None,
+    api_key: str | None = None,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> EventSourceResponse:
+    _require_api_key(api_key or x_api_key, authorization)
+    if bool(job_id) == bool(batch_id):
+        raise HTTPException(status_code=400, detail="Provide exactly one of job_id or batch_id.")
+
+    kind = "job" if job_id else "batch"
+    item_id = str(job_id or batch_id)
+    channel = event_channel(kind, item_id)
+
+    async def stream():
+        current = queue_snapshot(kind, item_id)
+        if current:
+            yield {"event": "snapshot", "data": json.dumps(current)}
+
+        pubsub = redis_client().pubsub(ignore_subscribe_messages=True)
+        await asyncio.to_thread(pubsub.subscribe, channel)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await asyncio.to_thread(pubsub.get_message, timeout=1.0)
+                if message and message.get("type") == "message":
+                    payload = message.get("data")
+                    yield {"event": "progress", "data": payload if isinstance(payload, str) else payload.decode("utf-8")}
+                    continue
+                yield {"event": "heartbeat", "data": json.dumps({"server_time": queue_now()})}
+        finally:
+            await asyncio.to_thread(pubsub.unsubscribe, channel)
+            await asyncio.to_thread(pubsub.close)
+
+    return EventSourceResponse(stream(), ping=15)
+
+
+@app.get("/api/queue/health")
+def api_queue_health(x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    return queue_health()
+
+
 def _completed_job_status(job: dict[str, object]) -> dict[str, object]:
     done = dict(job)
     done["status"] = "done"
     done["progress"] = 100
+    done["percent"] = 100
+    done["current_progress"] = 100
+    done["max_progress"] = 100
+    done["phase"] = "complete"
+    done["message"] = "Complete."
+    done["server_time"] = queue_now()
     done["kind"] = "completed"
     return done
 
@@ -377,7 +428,7 @@ def api_clear_jobs() -> dict[str, object]:
     return {
         "deleted": True,
         "deleted_jobs": int(completed.get("deleted_jobs", 0)) + int(queued.get("deleted_jobs", 0)),
-        "deleted_files": int(completed.get("deleted_files", 0)) + int(queued.get("deleted_jobs", 0)),
+        "deleted_files": int(completed.get("deleted_files", 0)) + int(queued.get("deleted_files", 0)),
         "kept_running": queued.get("kept_running", 0),
     }
 
@@ -421,6 +472,7 @@ def api_diagnostics() -> dict[str, object]:
         "status": "ok",
         "runtime": runtime,
         "storage": storage_summary(),
+        "queue": queue_health(),
         "limits": {
             "max_upload_mb": MAX_UPLOAD_MB,
             "max_image_dimension": MAX_IMAGE_DIMENSION,
@@ -447,6 +499,8 @@ def api_capabilities() -> dict[str, object]:
         "queue": {
             "single_image_jobs": True,
             "server_background_processing": True,
+            "backend": "redis-rq",
+            "events": "sse",
             "statuses": ["queued", "running", "done", "error"],
             "source_downloads": True,
             "retry_failed": True,

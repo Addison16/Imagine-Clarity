@@ -1,6 +1,6 @@
 # Imagine Clarity Project Context
 
-Last updated: 2026-05-04
+Last updated: 2026-05-11
 
 ## What This Is
 
@@ -18,6 +18,9 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - Background removal with multiple model/cut options and detail-preserving cleanup for logos and graphics.
 - Background refinement controls for edge trim, fringe cleanup, and inner background pocket cleanup.
 - All-in-One mode: background removal followed by upscale to a selected scale or target resolution.
+- Redis/RQ background processing for both single-image jobs and batch jobs.
+- Server-side progress snapshots with status, phase, message, percent, elapsed time, worker ID, and queue position.
+- SSE progress streaming through `/api/events`, with UI polling fallback.
 - Batch processing from the UI by selecting multiple image files.
 - Automation API via `/api/process` with image or JSON response modes and `/api/capabilities` for settings discovery.
 - Saved Jobs panel backed by persisted Docker storage.
@@ -44,6 +47,9 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - `docker-compose.prebuilt.gpu.yml`: pull-and-run GPU prebuilt image setup.
 - `app/main.py`: FastAPI routes, validation, health endpoint, and API responses.
 - `app/jobs.py`: saved output files and JSON job history.
+- `app/job_queue.py`: Redis metadata, RQ queue setup, public job/batch snapshots, queue health, and SSE event channels.
+- `app/tasks.py`: worker-side queued processing for single-image and batch jobs.
+- `app/worker.py`: RQ worker process entrypoint.
 - `app/upscaler.py`: upscale logic, hardware selection, target sizing, and alpha-aware transparent resizing.
 - `app/static/index.html`: web UI markup.
 - `app/static/app.js`: web UI behavior and form/API wiring.
@@ -61,6 +67,7 @@ Expected behavior:
 - Users can leave hardware on Auto for best default behavior.
 - Upscale and background removal have separate hardware selectors in the UI.
 - AMD and Intel GPUs are not automatically accelerated through Docker right now; they fall back to CPU unless a future backend is added for those runtimes.
+- Queued jobs are processed by the separate `clarity-worker` container. The web container only accepts uploads, writes source files to shared Docker storage, enqueues Redis/RQ jobs, and streams Redis status events back to the UI.
 
 ## Current Local State
 
@@ -68,6 +75,13 @@ The development container is named:
 
 ```powershell
 clarity-upscaler
+```
+
+The Redis and worker containers are:
+
+```powershell
+clarity-redis
+clarity-worker
 ```
 
 The local app URL is:
@@ -92,9 +106,11 @@ Saved outputs are stored inside the container at:
 
 ```powershell
 docker ps --filter name=clarity-upscaler
+docker ps --filter name=clarity-worker
 Invoke-RestMethod -Uri http://localhost:8794/health | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri http://localhost:8794/api/queue/health | ConvertTo-Json -Depth 5
 Get-Content scripts\smoke_test.py | docker exec -i clarity-upscaler python - http://127.0.0.1:8794
-python -m py_compile app\main.py app\upscaler.py app\background.py app\jobs.py scripts\smoke_test.py
+python -m py_compile app\main.py app\upscaler.py app\background.py app\jobs.py app\job_queue.py app\tasks.py app\worker.py scripts\smoke_test.py
 node --check app\static\app.js
 ```
 
@@ -111,10 +127,11 @@ node --check app\static\app.js
 - Added alpha-aware transparent resize plus edge trim, fringe cleanup, and inner cleanup controls for cleaner transparent cutouts.
 - Added optional API-key gate for automation endpoint via `CLARITY_API_KEY` and `X-API-Key` header.
 - Added optional CORS allowlist via `CORS_ALLOW_ORIGINS` and optional job/result TTL cleanup via `JOB_TTL_HOURS`.
+- Replaced in-process single/batch workers with Redis + RQ + a separate `worker` Compose service.
+- Added SSE progress streaming and `/api/queue/health`.
 
 ## Known Limits And Next Improvements
 
-- The app saves processed outputs and job metadata, but it still does not save original uploaded files by default.
 - Background removal can still need tuning for unusual artwork, fully enclosed background pockets, transparent edges, or busy images.
 - AMD and Intel GPU acceleration are not currently implemented; CPU fallback is expected.
-- A future improvement could add a real progress stream for long-running upscale/background jobs.
+- Queued source files are now saved for accepted jobs; older direct blocking API calls still save sources only in completed job history.

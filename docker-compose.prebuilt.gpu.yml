@@ -1,6 +1,21 @@
 services:
   upscaler:
-    image: ${CLARITY_IMAGE:-clarity-image-tools:gpu}
+    image: ${CLARITY_IMAGE:-ghcr.io/addison16/imagine-clarity:gpu}
+    environment:
+      UPSCALER_DEVICE: auto
+      REMBG_DEVICE: auto
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  worker:
+    image: ${CLARITY_IMAGE:-ghcr.io/addison16/imagine-clarity:gpu}
     environment:
       UPSCALER_DEVICE: auto
       REMBG_DEVICE: auto

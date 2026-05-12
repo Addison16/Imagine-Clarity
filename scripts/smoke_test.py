@@ -17,11 +17,15 @@ def main() -> int:
     diagnostics = requests.get(f"{base_url}/api/diagnostics", timeout=10)
     diagnostics.raise_for_status()
     assert diagnostics.json()["status"] == "ok", diagnostics.text
+    queue_health = requests.get(f"{base_url}/api/queue/health", timeout=10)
+    queue_health.raise_for_status()
+    assert queue_health.json()["redis_connected"], queue_health.text
     capabilities = requests.get(f"{base_url}/api/capabilities", timeout=10)
     capabilities.raise_for_status()
     assert "remove-background-upscale" in capabilities.json()["tools"], capabilities.text
     assert "tiff" in capabilities.json()["output_formats"], capabilities.text
     assert "lanczos" in capabilities.json()["upscale"]["resize_methods"], capabilities.text
+    assert capabilities.json()["queue"]["backend"] == "redis-rq", capabilities.text
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -311,7 +315,7 @@ def main() -> int:
         poll = requests.get(f"{base_url}/api/batches/{batch['id']}", timeout=10)
         poll.raise_for_status()
         batch = poll.json()
-        if batch["status"] == "completed":
+        if batch["status"] in {"done", "completed"}:
             break
         time.sleep(1)
     assert batch["completed"] == 2 and batch["failed"] == 0, batch
@@ -377,6 +381,36 @@ def main() -> int:
     jobs = requests.get(f"{base_url}/api/jobs?limit=5", timeout=10)
     jobs.raise_for_status()
     assert jobs.json()["jobs"], jobs.text
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/jobs/queue",
+        files={"image": ("queued.png", buffer, "image/png")},
+        data={
+            "tool": "upscale",
+            "scale": "2",
+            "mode": "conservative",
+            "device": "cpu",
+            "output_format": "png",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    queued = response.json()["job"]
+    assert queued["status"] in {"queued", "running", "done"}, queued
+    assert queued["percent"] >= 0, queued
+    for _ in range(30):
+        poll = requests.get(f"{base_url}/api/jobs/{queued['id']}", timeout=10)
+        poll.raise_for_status()
+        queued = poll.json()
+        if queued["status"] == "done":
+            break
+        if queued["status"] == "error":
+            raise AssertionError(queued)
+        time.sleep(1)
+    assert queued["download_url"].startswith("/api/results/"), queued
 
     print("smoke ok")
     return 0

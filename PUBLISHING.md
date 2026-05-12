@@ -46,14 +46,14 @@ The included GitHub Actions workflow publishes:
 
 After pushing to GitHub, open the repo's Actions tab and run `Docker Publish`, or push to the `main` branch. If the package should be public, change the package visibility in GitHub's Packages settings.
 
-Run prebuilt CPU image with Compose:
+Run prebuilt CPU image with Compose. This starts Redis, the web service, and the worker:
 
 ```powershell
 $env:CLARITY_IMAGE="ghcr.io/addison16/imagine-clarity:cpu"
 docker compose -f docker-compose.prebuilt.yml up -d
 ```
 
-Run prebuilt NVIDIA GPU image with Compose:
+Run prebuilt NVIDIA GPU image with Compose. The GPU override gives both the web service and the worker NVIDIA access:
 
 ```powershell
 $env:CLARITY_IMAGE="ghcr.io/addison16/imagine-clarity:gpu"
@@ -93,3 +93,4 @@ http://localhost:8794
 - NVIDIA GPU mode requires NVIDIA drivers plus Docker GPU support.
 - AMD and Intel graphics cards currently fall back to CPU mode.
 - The first AI run downloads model weights into the Docker volume.
+- Queued processing requires the Compose stack because Redis and the worker service must run beside the web service.

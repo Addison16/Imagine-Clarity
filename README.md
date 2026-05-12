@@ -27,19 +27,7 @@ http://localhost:8794
 
 The startup scripts use NVIDIA GPU acceleration when it is available and verified; otherwise the app runs on CPU. See [PUBLISHING.md](PUBLISHING.md) if you want to push prebuilt images to GitHub Container Registry.
 
-Run a published CPU image directly with Docker:
-
-```powershell
-docker run --pull always --name clarity-upscaler -p 8794:8794 -v clarity-models:/models ghcr.io/addison16/imagine-clarity:cpu
-```
-
-Run a published NVIDIA GPU image directly with Docker:
-
-```powershell
-docker run --pull always --gpus all --name clarity-upscaler -p 8794:8794 -v clarity-models:/models ghcr.io/addison16/imagine-clarity:gpu
-```
-
-Or use the prebuilt-image helper scripts:
+Use the prebuilt-image helper scripts when you want to pull from GitHub Container Registry instead of building locally:
 
 ```powershell
 .\scripts\start-prebuilt.ps1
@@ -56,7 +44,7 @@ Suggested public image tags after publishing:
 - `ghcr.io/addison16/imagine-clarity:cpu`: explicit CPU-compatible image.
 - `ghcr.io/addison16/imagine-clarity:gpu`: NVIDIA CUDA image for hosts with Docker GPU support.
 
-For most users, the easiest setup is:
+For most users pulling a published image, the easiest setup is:
 
 ```powershell
 docker compose -f docker-compose.prebuilt.yml up -d
@@ -80,6 +68,8 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Conservative`: alpha-aware Lanczos plus mild sharpening when exact geometry, text, transparent PNGs, or logos matter more than generated texture.
 - `Remove Background`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
+- `Redis worker queue`: single-image and batch jobs upload first, then run in a separate RQ worker container. Closing or refreshing the browser does not cancel accepted jobs.
+- `Paperless-style progress`: queued jobs store server-side status snapshots with phase, message, percent, elapsed time, worker ID, and queue position. The UI uses SSE live updates and falls back to polling.
 - `Batch processing`: select multiple images and the server runs them in the background one at a time. Closing the browser does not cancel the queued batch.
 - `Batch ZIP downloads`: completed batch outputs can be downloaded together as one ZIP file, with per-image result links still available.
 - `Comparison tools`: results open in the slider comparison view by default, with side-by-side, original-only, result-only, difference preview, fit, 100%, and 200% zoom views available from compact dropdowns.
@@ -159,7 +149,13 @@ http://localhost:8794
 
 The first neural upscale downloads model weights into the `upscaler-models` Docker volume. Conservative mode runs immediately.
 
-Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. Source previews for new single-image jobs are stored at `/tmp/upscaler/sources`; batch source files are stored under `/tmp/upscaler/batches`. This keeps downloads, previews, and completed batch ZIPs available after the browser refreshes or closes.
+Compose starts three services:
+
+- `upscaler`: FastAPI web/API service on port `8794`.
+- `worker`: Redis/RQ image-processing worker. Default concurrency is `1` to avoid GPU memory contention.
+- `redis`: durable Redis queue and progress store with append-only persistence.
+
+Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. Source previews for new single-image jobs are stored under `/tmp/upscaler/queued`; batch source files are stored under `/tmp/upscaler/batches`. Redis job state is stored in the `redis-data` Docker volume. This keeps downloads, previews, queue status, and completed batch ZIPs available after the browser refreshes or closes.
 
 ## Hardware Auto-Detection
 
@@ -253,6 +249,12 @@ Poll status:
 
 ```powershell
 curl.exe http://localhost:8794/api/jobs/QUEUE_JOB_ID
+```
+
+Stream live progress with server-sent events:
+
+```powershell
+curl.exe -N http://localhost:8794/api/events?job_id=QUEUE_JOB_ID
 ```
 
 Download the uploaded source while the job is queued or running:
@@ -365,6 +367,12 @@ curl.exe http://localhost:8794/api/batches
 curl.exe http://localhost:8794/api/batches/BATCH_ID
 ```
 
+Stream batch progress:
+
+```powershell
+curl.exe -N http://localhost:8794/api/events?batch_id=BATCH_ID
+```
+
 Download all completed images from a batch:
 
 ```powershell
@@ -393,6 +401,12 @@ Runtime diagnostics:
 
 ```powershell
 curl.exe http://localhost:8794/api/diagnostics
+```
+
+Queue health:
+
+```powershell
+curl.exe http://localhost:8794/api/queue/health
 ```
 
 Automation capability discovery:
@@ -433,7 +447,10 @@ curl.exe -X POST http://localhost:8794/api/process `
 - `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
 - `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
 - `QUEUE_HISTORY_LIMIT`: number of queued single-image job records kept, default `100`.
-- `QUEUE_WORKERS`: number of server-side single-image worker threads, default `1`.
+- `REDIS_URL`: Redis connection URL used by the web and worker services, default `redis://redis:6379/0` in Compose.
+- `RQ_QUEUE_NAME`: Redis/RQ queue name, default `image-jobs`.
+- `WORKER_CONCURRENCY`: number of worker processes in the worker container, default `1`. Keep this at `1` for most GPU setups to avoid out-of-memory failures.
+- `JOB_TIMEOUT_SECONDS`: maximum runtime for one queued job, default `7200`.
 - `BATCH_HISTORY_LIMIT`: number of saved batch records kept in the JSON history, default `50`.
 - `JOB_TTL_HOURS`: optional auto-cleanup window for saved jobs/results. `0` disables TTL cleanup (default).
 - `CLARITY_API_KEY`: optional API key for `/api/process`. If set, callers must send `X-API-Key: <value>` or `Authorization: Bearer <value>`.

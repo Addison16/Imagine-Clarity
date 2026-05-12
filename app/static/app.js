@@ -127,6 +127,7 @@ let currentBatchId = null;
 let currentQueueJobId = null;
 let historyJobsCache = [];
 let historyBatchesCache = [];
+let activeEventSource = null;
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
   value: option.value,
@@ -445,6 +446,17 @@ function clearBusyStatus() {
 function setProgress(percent, detail = "") {
   progressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
   if (detail) processingDetail.textContent = detail;
+}
+
+function progressPercent(work) {
+  return Number(work?.percent ?? work?.progress ?? 0);
+}
+
+function closeActiveEventSource() {
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+  }
 }
 
 function formatDuration(totalSeconds) {
@@ -1369,7 +1381,9 @@ function jobSummary(job) {
   if (output.width && output.height) {
     return `${output.width} x ${output.height} ${format}${output.size_bytes ? ` | ${formatBytes(output.size_bytes)}` : ""}`;
   }
-  return `Status: ${job.status || "queued"}${Number.isFinite(job.progress) ? ` | ${job.progress}%` : ""}`;
+  const progress = progressPercent(job);
+  const message = job.message ? ` | ${job.message}` : "";
+  return `Status: ${job.status || "queued"}${Number.isFinite(progress) ? ` | ${progress}%` : ""}${message}`;
 }
 
 function queuedJobToResult(job) {
@@ -1407,12 +1421,13 @@ function showQueuedJobResult(job) {
 function batchToResults(batch) {
   return (batch.items || []).map((item) => {
     const done = item.status === "done";
+    const progress = progressPercent(item);
     return {
       ok: done,
       pending: !done && item.status !== "error",
       status: item.status || "queued",
       name: item.filename,
-      summary: done ? item.result_filename || "Done" : `Status: ${item.status || "queued"}`,
+      summary: done ? item.result_filename || "Done" : `Status: ${item.status || "queued"}${Number.isFinite(progress) ? ` | ${progress}%` : ""}${item.message ? ` | ${item.message}` : ""}`,
       error: item.error || "Failed",
       downloadUrl: item.result_download_url || "",
       sourceUrl: item.source_url || "",
@@ -1882,42 +1897,149 @@ async function resumeRunningJobs() {
   }
 }
 
-async function pollBatch(batchId) {
+function isBatchDone(batch) {
+  return ["done", "completed"].includes(batch?.status);
+}
+
+function applyBatchProgress(batch) {
+  const done = batch.completed || 0;
+  const failed = batch.failed || 0;
+  const total = batch.total || 0;
+  const progress = progressPercent(batch);
+  setServerBusyStatus(
+    batch.status === "queued" ? "Queued on server" : "Processing batch on server",
+    batch,
+    batch.message || `Batch ${String(batch.id || "").slice(0, 8)}: ${done + failed}/${total} complete. Server elapsed ${formatDuration(serverElapsedSeconds(batch))}.`,
+  );
+  setProgress(Number.isFinite(progress) ? progress : total ? Math.round(((done + failed) / total) * 100) : 0, batch.message || `Batch progress: ${done + failed}/${total}`);
+  renderBatchResults(batchToResults(batch), batch);
+}
+
+function applyQueuedJobProgress(job) {
+  const status = job.status || "queued";
+  const progress = progressPercent(job);
+  setServerBusyStatus(
+    status === "queued" ? "Queued on server" : "Processing on server",
+    job,
+    job.message || `Server job ${String(job.id || "").slice(0, 8)}: ${status}. Server elapsed ${formatDuration(serverElapsedSeconds(job))}.`,
+  );
+  setProgress(progress, job.message || `Server job ${String(job.id || "").slice(0, 8)}: ${status}`);
+  renderBatchResults([queuedJobToResult(job)]);
+}
+
+function parseEventPayload(event) {
+  try {
+    return JSON.parse(event.data || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function streamBatch(batchId, fallback) {
+  if (!("EventSource" in window)) return fallback();
+  closeActiveEventSource();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const source = new EventSource(`/api/events?batch_id=${encodeURIComponent(batchId)}`);
+    activeEventSource = source;
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (activeEventSource === source) activeEventSource = null;
+      callback(value);
+    };
+
+    const handle = (event) => {
+      const payload = parseEventPayload(event);
+      const batch = payload.batch;
+      if (!batch) return;
+      applyBatchProgress(batch);
+      if (isBatchDone(batch)) finish(resolve, batch);
+      if (batch.status === "error") finish(reject, new Error(batch.error || batch.message || "Batch job failed."));
+    };
+
+    source.addEventListener("snapshot", handle);
+    source.addEventListener("progress", handle);
+    source.onerror = () => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (activeEventSource === source) activeEventSource = null;
+      fallback().then(resolve).catch(reject);
+    };
+  });
+}
+
+function streamQueuedJob(jobId, fallback) {
+  if (!("EventSource" in window)) return fallback();
+  closeActiveEventSource();
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const source = new EventSource(`/api/events?job_id=${encodeURIComponent(jobId)}`);
+    activeEventSource = source;
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (activeEventSource === source) activeEventSource = null;
+      callback(value);
+    };
+
+    const handle = (event) => {
+      const payload = parseEventPayload(event);
+      const job = payload.job;
+      if (!job) return;
+      applyQueuedJobProgress(job);
+      if (job.status === "done") finish(resolve, job);
+      if (job.status === "error") finish(reject, new Error(job.error || job.message || "Server job failed."));
+    };
+
+    source.addEventListener("snapshot", handle);
+    source.addEventListener("progress", handle);
+    source.onerror = () => {
+      if (settled) return;
+      settled = true;
+      source.close();
+      if (activeEventSource === source) activeEventSource = null;
+      fallback().then(resolve).catch(reject);
+    };
+  });
+}
+
+async function pollBatchHttp(batchId) {
   while (true) {
     const response = await fetch(`/api/batches/${encodeURIComponent(batchId)}`, { cache: "no-store" });
     if (!response.ok) throw new Error("Batch status failed");
     const batch = await response.json();
-    const done = batch.completed || 0;
-    const failed = batch.failed || 0;
-    const total = batch.total || 0;
-    setServerBusyStatus(
-      batch.status === "queued" ? "Queued on server" : "Processing batch on server",
-      batch,
-      `Batch ${String(batch.id || batchId).slice(0, 8)}: ${done + failed}/${total} complete. Server elapsed ${formatDuration(serverElapsedSeconds(batch))}.`,
-    );
-    setProgress(total ? Math.round(((done + failed) / total) * 100) : 0, `Batch progress: ${done + failed}/${total}`);
-    if (batch.status === "completed") return batch;
+    applyBatchProgress(batch);
+    if (isBatchDone(batch)) return batch;
+    if (batch.status === "error") throw new Error(batch.error || batch.message || "Batch job failed.");
     await delay(1200);
   }
 }
 
-async function pollQueuedJob(jobId) {
+async function pollBatch(batchId) {
+  return streamBatch(batchId, () => pollBatchHttp(batchId));
+}
+
+async function pollQueuedJobHttp(jobId) {
   while (true) {
     const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
     if (!response.ok) throw new Error("Job status failed");
     const job = await response.json();
     const status = job.status || "queued";
-    const progress = Number(job.progress || 0);
-    setServerBusyStatus(
-      status === "queued" ? "Queued on server" : "Processing on server",
-      job,
-      `Server job ${String(job.id || jobId).slice(0, 8)}: ${status}. Server elapsed ${formatDuration(serverElapsedSeconds(job))}.`,
-    );
-    setProgress(progress, `Server job ${String(job.id || jobId).slice(0, 8)}: ${status}`);
+    applyQueuedJobProgress(job);
     if (status === "done") return job;
     if (status === "error") throw new Error(job.error || "Server job failed.");
     await delay(1200);
   }
+}
+
+async function pollQueuedJob(jobId) {
+  return streamQueuedJob(jobId, () => pollQueuedJobHttp(jobId));
 }
 
 async function resumeQueuedJob(job) {
@@ -2028,8 +2150,11 @@ function renderDiagnostics(data) {
   const runtime = data.runtime || {};
   const storage = data.storage || {};
   const limits = data.limits || {};
+  const queue = data.queue || {};
+  const workerCount = Array.isArray(queue.workers) ? queue.workers.length : 0;
   const rows = [
     ["Hardware", runtime.cuda_available ? `NVIDIA GPU: ${runtime.cuda_device || "CUDA"}` : "CPU runtime"],
+    ["Queue", queue.redis_connected ? `Redis ready | ${queue.queue_depth || 0} waiting | ${queue.started_count || 0} running | ${workerCount} worker${workerCount === 1 ? "" : "s"}` : `Redis unavailable${queue.error ? ` | ${queue.error}` : ""}`],
     ["Available devices", Array.isArray(runtime.available_devices) ? runtime.available_devices.join(", ") : "cpu"],
     ["ONNX providers", Array.isArray(runtime.onnx_providers) ? runtime.onnx_providers.join(", ") : "Unknown"],
     ["Saved outputs", `${storage.saved_jobs || 0} jobs | ${formatBytes(storage.saved_bytes || 0)} output | ${formatBytes(storage.saved_source_bytes || 0)} source`],

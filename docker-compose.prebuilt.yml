@@ -1,15 +1,28 @@
 services:
+  redis:
+    image: redis:8-alpine
+    container_name: clarity-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis-data:/data
+
   upscaler:
-    image: ${CLARITY_IMAGE:-clarity-image-tools:cpu}
+    image: ${CLARITY_IMAGE:-ghcr.io/addison16/imagine-clarity:cpu}
     container_name: clarity-upscaler
     restart: unless-stopped
+    depends_on:
+      - redis
     ports:
       - "${HOST_PORT:-8794}:8794"
     environment:
       MODEL_DIR: /models
       U2NET_HOME: /models/rembg
       STORAGE_DIR: /tmp/upscaler
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUE_NAME: image-jobs
       HISTORY_LIMIT: "${HISTORY_LIMIT:-100}"
+      QUEUE_HISTORY_LIMIT: "${QUEUE_HISTORY_LIMIT:-100}"
       BATCH_HISTORY_LIMIT: "${BATCH_HISTORY_LIMIT:-50}"
       MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-64}"
       MAX_BATCH_FILES: "${MAX_BATCH_FILES:-100}"
@@ -22,6 +35,34 @@ services:
       - upscaler-models:/models
       - upscaler-storage:/tmp/upscaler
 
+  worker:
+    image: ${CLARITY_IMAGE:-ghcr.io/addison16/imagine-clarity:cpu}
+    container_name: clarity-worker
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    depends_on:
+      - redis
+      - upscaler
+    command: ["python", "-m", "app.worker"]
+    environment:
+      MODEL_DIR: /models
+      U2NET_HOME: /models/rembg
+      STORAGE_DIR: /tmp/upscaler
+      REDIS_URL: redis://redis:6379/0
+      RQ_QUEUE_NAME: image-jobs
+      WORKER_CONCURRENCY: "${WORKER_CONCURRENCY:-1}"
+      HISTORY_LIMIT: "${HISTORY_LIMIT:-100}"
+      QUEUE_HISTORY_LIMIT: "${QUEUE_HISTORY_LIMIT:-100}"
+      BATCH_HISTORY_LIMIT: "${BATCH_HISTORY_LIMIT:-50}"
+      MAX_IMAGE_DIMENSION: "${MAX_IMAGE_DIMENSION:-16384}"
+      UPSCALER_DEVICE: "${UPSCALER_DEVICE:-auto}"
+      REMBG_DEVICE: "${REMBG_DEVICE:-auto}"
+    volumes:
+      - upscaler-models:/models
+      - upscaler-storage:/tmp/upscaler
+
 volumes:
+  redis-data:
   upscaler-models:
   upscaler-storage:
