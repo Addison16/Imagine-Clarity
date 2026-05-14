@@ -605,7 +605,8 @@ input[type="range"] {
   accent-color: var(--accent);
 }
 
-input[type="number"] {
+input[type="number"],
+input[type="text"] {
   width: 100%;
   height: 44px;
   border: 1px solid var(--border-strong);
@@ -618,7 +619,8 @@ input[type="number"] {
   outline: none;
 }
 
-input[type="number"]:focus {
+input[type="number"]:focus,
+input[type="text"]:focus {
   border-color: var(--accent);
   box-shadow: var(--focus);
 }
@@ -691,16 +693,22 @@ input[type="number"]:focus {
   clip: rect(0 0 0 0);
 }
 
+.workflow-card-grid,
 .preset-card-grid,
 .action-card-grid {
   display: grid;
   gap: 8px;
 }
 
+.workflow-card-grid {
+  grid-template-columns: 1fr;
+}
+
 .preset-card-grid {
   grid-template-columns: 1fr 1fr;
 }
 
+.workflow-card,
 .preset-card,
 .action-card {
   min-width: 0;
@@ -720,6 +728,7 @@ input[type="number"]:focus {
     box-shadow 140ms ease;
 }
 
+.workflow-card span,
 .preset-card span,
 .action-name {
   color: var(--text);
@@ -728,6 +737,7 @@ input[type="number"]:focus {
   line-height: 1.2;
 }
 
+.workflow-card small,
 .preset-card small,
 .action-card small {
   color: var(--muted);
@@ -736,6 +746,8 @@ input[type="number"]:focus {
   line-height: 1.3;
 }
 
+.workflow-card:hover,
+.workflow-card.active,
 .preset-card:hover,
 .preset-card.active,
 .action-card:hover,
@@ -749,6 +761,7 @@ input[type="number"]:focus {
   transform: translateY(-1px);
 }
 
+.workflow-card:focus-visible,
 .preset-card:focus-visible,
 .action-card:focus-visible,
 .action-card:focus-within {
@@ -768,6 +781,18 @@ input[type="number"]:focus {
 
 .action-card-button {
   font: inherit;
+}
+
+.preset-save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.preset-save-row .small-button {
+  min-height: 44px;
+  white-space: nowrap;
 }
 
 .muted-copy {
@@ -1341,6 +1366,70 @@ body:not(.pro-mode) .advanced {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.result-review {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.result-review-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.result-review-header strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.review-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.review-check {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.review-check:hover,
+.review-check:focus-visible {
+  border-color: #9db4ff;
+  background: #f3f6ff;
+  outline: none;
+}
+
+.review-check span {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.review-check small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.quick-fix-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .compare-controls {
@@ -1966,7 +2055,9 @@ body:not(.pro-mode) .advanced {
   .segmented,
   .action-segmented,
   .button-group,
+  .workflow-card-grid,
   .preset-card-grid,
+  .review-check-grid,
   .steps {
     grid-template-columns: 1fr;
   }
@@ -1981,6 +2072,7 @@ body:not(.pro-mode) .advanced {
   }
 
   .result-buttons,
+  .quick-fix-row .small-button,
   .utility-actions,
   .job-actions,
   .secondary-button,

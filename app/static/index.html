@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Imagine Clarity | Image Tools</title>
     <link rel="icon" href="/static/brand-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260511a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260513a" />
   </head>
   <body>
     <main class="page-shell">
@@ -82,6 +82,33 @@
               <span id="experience-note" class="field-note">Beginner mode keeps the first workflow focused on upload, action, size, and export.</span>
             </div>
 
+            <div class="field">
+              <span class="label">What are you making?</span>
+              <div id="workflow-cards" class="workflow-card-grid" role="group" aria-label="Workflow type">
+                <button class="workflow-card active" type="button" data-workflow-choice="shirt" aria-pressed="true">
+                  <span>Shirt Design</span>
+                  <small>Transparent PNG on a 4500 x 5400 canvas.</small>
+                </button>
+                <button class="workflow-card" type="button" data-workflow-choice="sticker" aria-pressed="false">
+                  <span>Sticker / Logo</span>
+                  <small>Clean edges, protected lettering, transparent output.</small>
+                </button>
+                <button class="workflow-card" type="button" data-workflow-choice="product" aria-pressed="false">
+                  <span>Product Photo</span>
+                  <small>Cut out the item and prep a clean listing image.</small>
+                </button>
+                <button class="workflow-card" type="button" data-workflow-choice="web" aria-pressed="false">
+                  <span>Web / Listing Image</span>
+                  <small>Fast sRGB output with smaller WebP/JPEG options.</small>
+                </button>
+                <button class="workflow-card" type="button" data-workflow-choice="custom" aria-pressed="false">
+                  <span>Custom</span>
+                  <small>Keep your current settings and tune manually.</small>
+                </button>
+              </div>
+              <span id="workflow-note" class="field-note">Start with a goal. Clarity will apply matching action, size, cut, and export settings.</span>
+            </div>
+
             <div id="recommendation-card" class="recommendation-card hidden" aria-live="polite">
               <div>
                 <span class="eyebrow">Recommended settings</span>
@@ -91,7 +118,7 @@
               <button id="use-recommendation" class="small-button" type="button">Use Recommended</button>
             </div>
 
-            <label class="field">
+            <div class="field">
               <span class="label">Preset</span>
               <select id="preset" class="preset-select" aria-label="Preset">
                 <option value="smart" selected>Smart Auto</option>
@@ -129,7 +156,12 @@
                 </button>
               </div>
               <span id="preset-note" class="field-note">Smart Auto keeps model detection enabled and chooses safer defaults.</span>
-            </label>
+              <div class="preset-save-row">
+                <input id="preset-name" type="text" maxlength="80" placeholder="Name current settings" aria-label="Preset name" />
+                <button id="save-preset" class="small-button" type="button">Save Preset</button>
+              </div>
+              <button id="delete-preset" class="ghost-button danger-button hidden" type="button">Delete User Preset</button>
+            </div>
 
             <div class="field">
               <span class="label">What do you want to do?</span>
@@ -677,6 +709,39 @@
               <button id="process-another" class="ghost-button" type="button">Process Another</button>
             </div>
           </footer>
+          <section id="result-review" class="result-review hidden" aria-label="Result review">
+            <div class="result-review-header">
+              <div>
+                <span class="eyebrow">Result Review</span>
+                <strong>Check the common trouble spots</strong>
+              </div>
+              <span id="result-review-job" class="mini-badge">Queued job</span>
+            </div>
+            <div class="review-check-grid">
+              <button type="button" class="review-check" data-review-action="edge">
+                <span>Edge cleanup</span>
+                <small>Inspect halos and leftover background on dark/green preview.</small>
+              </button>
+              <button type="button" class="review-check" data-review-action="transparent">
+                <span>Transparent background</span>
+                <small>Switch backgrounds to confirm the alpha channel is clean.</small>
+              </button>
+              <button type="button" class="review-check" data-review-action="detail">
+                <span>Lettering / detail</span>
+                <small>Open 100% compare to catch warped letters or lost texture.</small>
+              </button>
+              <button type="button" class="review-check" data-review-action="size">
+                <span>Output size</span>
+                <small>Confirm target pixels, format, and print metadata.</small>
+              </button>
+            </div>
+            <div class="quick-fix-row" aria-label="Quick reprocess actions">
+              <button type="button" class="small-button" data-quick-fix="fix-white-halo">Fix White Halo</button>
+              <button type="button" class="small-button" data-quick-fix="trim-edge-slightly">Trim Edge Slightly</button>
+              <button type="button" class="small-button" data-quick-fix="preserve-more-detail">Preserve More Detail</button>
+              <button type="button" class="small-button" data-quick-fix="stronger-background-cut">Stronger Background Cut</button>
+            </div>
+          </section>
           <div id="compare-controls" class="compare-controls hidden" aria-label="Comparison controls">
             <label class="compare-select">
               <span>View</span>
@@ -763,11 +828,11 @@
       </section>
       <footer class="app-footer">
         <span>Imagine Clarity</span>
-        <span>Build 2026.05.11a</span>
+        <span>Build 2026.05.13a</span>
         <span>Diagnostics live under System.</span>
       </footer>
     </main>
 
-    <script src="/static/app.js?v=20260511a"></script>
+    <script src="/static/app.js?v=20260513a"></script>
   </body>
 </html>

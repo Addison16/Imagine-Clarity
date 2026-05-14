@@ -77,6 +77,8 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download, preview, and before/after comparison when a source preview is available. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
 - `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
 - `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
+- `Guided workflows`: the Process tab starts with creator goals such as Shirt Design, Sticker/Logo, Product Photo, and Web/Listing Image. Each card applies action, target size, model, cut strength, fit mode, and export defaults.
+- `Result review`: completed queued jobs show edge, transparency, lettering/detail, and output-size review shortcuts plus one-click server-side reprocess actions for halos, edge trim, detail preservation, and stronger background cuts.
 
 AI upscalers infer detail that is not present in the source. For maximum fidelity, compare neural modes against `Conservative` on images with text, product labels, legal/medical imagery, or identity-sensitive faces.
 
@@ -269,6 +271,16 @@ Retry a queued job that failed:
 curl.exe -X POST http://localhost:8794/api/jobs/QUEUE_JOB_ID/retry
 ```
 
+Reprocess from the stored queued source using a quick fix:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/jobs/QUEUE_JOB_ID/reprocess `
+  -H "Content-Type: application/json" `
+  --data "{\"quick_fix\":\"fix-white-halo\"}"
+```
+
+Valid quick fixes are `fix-white-halo`, `trim-edge-slightly`, `preserve-more-detail`, and `stronger-background-cut`.
+
 Valid `tool` values for `/api/process`:
 
 - `upscale`
@@ -408,6 +420,20 @@ Queue health:
 ```powershell
 curl.exe http://localhost:8794/api/queue/health
 ```
+
+Server-saved presets:
+
+```powershell
+curl.exe http://localhost:8794/api/presets
+
+curl.exe -X POST http://localhost:8794/api/presets `
+  -H "Content-Type: application/json" `
+  --data "{\"name\":\"Shirt Cleanup\",\"description\":\"My default shirt workflow\",\"tool\":\"remove-background-upscale\",\"settings\":{\"preset_key\":\"logo\"}}"
+
+curl.exe -X DELETE http://localhost:8794/api/presets/user_PRESET_ID
+```
+
+Built-in presets are returned by `GET /api/presets` but cannot be deleted.
 
 Automation capability discovery:
 

@@ -26,6 +26,28 @@ def main() -> int:
     assert "tiff" in capabilities.json()["output_formats"], capabilities.text
     assert "lanczos" in capabilities.json()["upscale"]["resize_methods"], capabilities.text
     assert capabilities.json()["queue"]["backend"] == "redis-rq", capabilities.text
+    presets = requests.get(f"{base_url}/api/presets", timeout=10)
+    presets.raise_for_status()
+    preset_payload = presets.json()
+    assert any(preset["id"] == "smart" for preset in preset_payload["presets"]), preset_payload
+    user_preset = requests.post(
+        f"{base_url}/api/presets",
+        json={
+            "name": f"Smoke Preset {int(time.time())}",
+            "description": "Smoke-test saved preset",
+            "tool": "upscale",
+            "settings": {"tool": "upscale", "scale": "2", "sizing": "scale", "format": "png"},
+        },
+        timeout=10,
+    )
+    user_preset.raise_for_status()
+    preset_id = user_preset.json()["preset"]["id"]
+    assert preset_id.startswith("user-"), user_preset.text
+    protected = requests.delete(f"{base_url}/api/presets/smart", timeout=10)
+    assert protected.status_code == 403, protected.text
+    deleted_preset = requests.delete(f"{base_url}/api/presets/{preset_id}", timeout=10)
+    deleted_preset.raise_for_status()
+    assert deleted_preset.json()["deleted"], deleted_preset.text
 
     img = Image.new("RGB", (64, 48), "#f8fafc")
     draw = ImageDraw.Draw(img)
@@ -411,6 +433,25 @@ def main() -> int:
             raise AssertionError(queued)
         time.sleep(1)
     assert queued["download_url"].startswith("/api/results/"), queued
+    reprocess = requests.post(
+        f"{base_url}/api/jobs/{queued['id']}/reprocess",
+        json={"quick_fix": "preserve-more-detail"},
+        timeout=10,
+    )
+    reprocess.raise_for_status()
+    requeued = reprocess.json()["job"]
+    assert requeued["id"] != queued["id"], requeued
+    assert requeued["status"] in {"queued", "running", "done"}, requeued
+    for _ in range(30):
+        poll = requests.get(f"{base_url}/api/jobs/{requeued['id']}", timeout=10)
+        poll.raise_for_status()
+        requeued = poll.json()
+        if requeued["status"] == "done":
+            break
+        if requeued["status"] == "error":
+            raise AssertionError(requeued)
+        time.sleep(1)
+    assert requeued["download_url"].startswith("/api/results/"), requeued
 
     print("smoke ok")
     return 0

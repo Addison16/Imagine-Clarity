@@ -109,6 +109,34 @@ def retry_queued_job(job_id: str) -> dict[str, Any] | None:
     )
 
 
+def reprocess_queued_job(
+    job_id: str,
+    *,
+    quick_fix: str | None = None,
+    settings: dict[str, Any] | None = None,
+    tool: str | None = None,
+) -> dict[str, Any] | None:
+    raw = refresh_job_from_rq(job_id)
+    if not raw:
+        return None
+    source = queued_source_path(job_id)
+    if not source:
+        return None
+
+    next_tool = str(tool or raw.get("tool") or "upscale")
+    next_settings = dict(settings or raw.get("settings") or {})
+    if quick_fix:
+        next_tool, next_settings = _apply_quick_fix(next_tool, next_settings, quick_fix)
+
+    return create_queued_job(
+        filename=str(raw.get("source_filename") or Path(source).name),
+        data=source.read_bytes(),
+        input_metadata=dict(raw.get("input") or {}),
+        tool=next_tool,
+        settings=next_settings,
+    )
+
+
 def delete_queued_job(job_id: str) -> dict[str, Any] | None:
     return delete_job_meta(job_id)
 
@@ -120,3 +148,98 @@ def clear_queued_jobs() -> dict[str, Any]:
 def start_queued_workers() -> None:
     # Redis/RQ workers now run in a separate Docker service.
     return None
+
+
+def _apply_quick_fix(tool: str, settings: dict[str, Any], quick_fix: str) -> tuple[str, dict[str, Any]]:
+    normalized = str(quick_fix or "").strip().lower().replace("_", "-")
+    fixed = dict(settings)
+    background = _background_settings(tool, fixed)
+    upscale = _upscale_settings(tool, fixed)
+
+    if normalized in {"fix-white-halo", "white-halo"}:
+        if background is not None:
+            background["edge_trim"] = _clamp_int(background.get("edge_trim"), 0, 8, bump=1, minimum=2)
+            background["fringe_cleanup"] = _clamp_int(background.get("fringe_cleanup"), 0, 100, bump=20, minimum=55)
+            background["background_tolerance"] = _clamp_int(background.get("background_tolerance"), 4, 96, bump=4)
+            background["post_process_mask"] = True
+            background["preserve_interior"] = True
+        if upscale is not None:
+            upscale["resize_method"] = "preserve"
+            upscale["sharpen_amount"] = _clamp_int(upscale.get("sharpen_amount"), 0, 200, bump=-10)
+        return tool, fixed
+
+    if normalized in {"trim-edge-slightly", "trim-edge", "edge-trim"}:
+        if background is not None:
+            background["edge_trim"] = _clamp_int(background.get("edge_trim"), 0, 8, bump=1, minimum=1)
+            background["edge_refine"] = _clamp_int(background.get("edge_refine"), 0, 20, bump=2)
+            background["fringe_cleanup"] = _clamp_int(background.get("fringe_cleanup"), 0, 100, bump=10)
+        return tool, fixed
+
+    if normalized in {"preserve-more-detail", "preserve-detail"}:
+        if background is not None:
+            background["cut_mode"] = "preserve"
+            background["alpha_matting"] = False
+            background["post_process_mask"] = False
+            background["preserve_interior"] = True
+            background["edge_trim"] = _clamp_int(background.get("edge_trim"), 0, 8, bump=-1)
+            background["fringe_cleanup"] = _clamp_int(background.get("fringe_cleanup"), 0, 100, bump=-25)
+            background["inner_cleanup"] = _clamp_int(background.get("inner_cleanup"), 0, 100, bump=-20)
+            background["background_tolerance"] = _clamp_int(background.get("background_tolerance"), 4, 96, bump=-10)
+        if upscale is not None:
+            upscale["mode"] = "conservative"
+            upscale["denoise"] = _clamp_float(upscale.get("denoise"), 0.0, 1.0, bump=-0.1)
+            upscale["sharpen_amount"] = _clamp_int(upscale.get("sharpen_amount"), 0, 200, bump=-10)
+        return tool, fixed
+
+    if normalized in {"stronger-background-cut", "stronger-cut", "strong-cut"}:
+        if background is not None:
+            background["cut_mode"] = "strong"
+            background["edge_refine"] = _clamp_int(background.get("edge_refine"), 0, 20, bump=6, minimum=12)
+            background["edge_trim"] = _clamp_int(background.get("edge_trim"), 0, 8, bump=1, minimum=2)
+            background["fringe_cleanup"] = _clamp_int(background.get("fringe_cleanup"), 0, 100, bump=25, minimum=70)
+            background["inner_cleanup"] = _clamp_int(background.get("inner_cleanup"), 0, 100, bump=25, minimum=55)
+            background["background_tolerance"] = _clamp_int(background.get("background_tolerance"), 4, 96, bump=12, minimum=46)
+            background["post_process_mask"] = True
+            background["preserve_interior"] = False
+        return tool, fixed
+
+    raise ValueError(f"Unknown quick fix: {quick_fix}")
+
+
+def _background_settings(tool: str, settings: dict[str, Any]) -> dict[str, Any] | None:
+    if tool == "remove-background-upscale":
+        background = dict(settings.get("background") or {})
+        settings["background"] = background
+        return background
+    if tool == "remove-background":
+        return settings
+    return None
+
+
+def _upscale_settings(tool: str, settings: dict[str, Any]) -> dict[str, Any] | None:
+    if tool == "remove-background-upscale":
+        upscale = dict(settings.get("upscale") or {})
+        settings["upscale"] = upscale
+        return upscale
+    if tool == "upscale":
+        return settings
+    return None
+
+
+def _clamp_int(value: object, low: int, high: int, *, bump: int = 0, minimum: int | None = None) -> int:
+    try:
+        current = int(float(value))
+    except (TypeError, ValueError):
+        current = minimum if minimum is not None else low
+    next_value = current + bump
+    if minimum is not None:
+        next_value = max(next_value, minimum)
+    return max(low, min(high, next_value))
+
+
+def _clamp_float(value: object, low: float, high: float, *, bump: float = 0.0) -> float:
+    try:
+        current = float(value)
+    except (TypeError, ValueError):
+        current = low
+    return max(low, min(high, round(current + bump, 3)))

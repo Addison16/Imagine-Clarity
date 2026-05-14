@@ -11,7 +11,7 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -45,9 +45,11 @@ from app.queued_jobs import (
     get_queued_job,
     list_queued_jobs,
     queued_source_path,
+    reprocess_queued_job,
     retry_queued_job,
 )
 from app.job_queue import event_channel, now as queue_now, queue_health, redis_client, snapshot as queue_snapshot
+from app.presets import create_preset, delete_preset, list_presets
 from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, resolve_upscale_sizes, upscale_image
 
 APP_DIR = Path(__file__).resolve().parent
@@ -233,6 +235,35 @@ def api_retry_job(job_id: str, x_api_key: str | None = Header(default=None), aut
     return JSONResponse(status_code=202, content={"job": job})
 
 
+@app.post("/api/jobs/{job_id}/reprocess")
+def api_reprocess_job(
+    job_id: str,
+    payload: dict[str, object] | None = Body(default=None),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    body = payload or {}
+    raw_settings = body.get("settings")
+    if raw_settings is not None and not isinstance(raw_settings, dict):
+        raise HTTPException(status_code=400, detail="settings must be an object when provided.")
+    raw_tool = body.get("tool")
+    if raw_tool is not None and str(raw_tool) not in SUPPORTED_TOOLS:
+        raise HTTPException(status_code=400, detail=f"tool must be one of: {', '.join(SUPPORTED_TOOLS)}.")
+    try:
+        job = reprocess_queued_job(
+            job_id,
+            quick_fix=str(body.get("quick_fix") or body.get("action") or "").strip() or None,
+            settings=raw_settings,
+            tool=str(raw_tool) if raw_tool is not None else None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not job:
+        raise HTTPException(status_code=404, detail="Queued job not found or source is unavailable.")
+    return JSONResponse(status_code=202, content={"job": job})
+
+
 @app.get("/api/events")
 async def api_events(
     request: Request,
@@ -278,6 +309,47 @@ async def api_events(
 def api_queue_health(x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
     _require_api_key(x_api_key, authorization)
     return queue_health()
+
+
+@app.get("/api/presets")
+def api_presets(x_api_key: str | None = Header(default=None), authorization: str | None = Header(default=None)) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    return {"presets": list_presets()}
+
+
+@app.post("/api/presets")
+def api_create_preset(
+    payload: dict[str, object] = Body(...),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> JSONResponse:
+    _require_api_key(x_api_key, authorization)
+    settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    try:
+        preset = create_preset(
+            name=str(payload.get("name") or ""),
+            description=str(payload.get("description") or ""),
+            tool=str(payload.get("tool") or "upscale"),
+            settings=settings,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(status_code=201, content={"preset": preset})
+
+
+@app.delete("/api/presets/{preset_id}")
+def api_delete_preset(
+    preset_id: str,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    deleted = delete_preset(preset_id)
+    if deleted is None:
+        raise HTTPException(status_code=403, detail="Built-in presets cannot be deleted.")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Preset not found.")
+    return {"deleted": True, "preset_id": preset_id}
 
 
 def _completed_job_status(job: dict[str, object]) -> dict[str, object]:

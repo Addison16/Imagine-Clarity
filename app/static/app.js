@@ -10,7 +10,13 @@ const statusDetail = document.querySelector("#status-detail");
 const runtimeChip = document.querySelector("#runtime-chip");
 const presetSelect = document.querySelector("#preset");
 const presetNote = document.querySelector("#preset-note");
-const presetCards = document.querySelectorAll("[data-preset-choice]");
+const presetCardGrid = document.querySelector("#preset-cards");
+let presetCards = document.querySelectorAll("[data-preset-choice]");
+const workflowCards = document.querySelectorAll("[data-workflow-choice]");
+const workflowNote = document.querySelector("#workflow-note");
+const presetNameInput = document.querySelector("#preset-name");
+const savePresetButton = document.querySelector("#save-preset");
+const deletePresetButton = document.querySelector("#delete-preset");
 const experienceInputs = document.querySelectorAll('input[name="experience_mode"]');
 const experienceNote = document.querySelector("#experience-note");
 const recommendationCard = document.querySelector("#recommendation-card");
@@ -60,6 +66,10 @@ const backgroundDevice = document.querySelector("#background-device");
 const resultActions = document.querySelector("#result-actions");
 const resultDownload = document.querySelector("#result-download");
 const resultSummary = document.querySelector("#result-summary");
+const resultReview = document.querySelector("#result-review");
+const resultReviewJob = document.querySelector("#result-review-job");
+const reviewCheckButtons = document.querySelectorAll("[data-review-action]");
+const quickFixButtons = document.querySelectorAll("[data-quick-fix]");
 const compareToggle = document.querySelector("#compare-toggle");
 const processAnother = document.querySelector("#process-another");
 const compareStage = document.querySelector("#compare-stage");
@@ -125,6 +135,10 @@ let differenceToken = 0;
 let historyPreviewEnabled = false;
 let currentBatchId = null;
 let currentQueueJobId = null;
+let currentResultJob = null;
+let activeWorkflow = "shirt";
+let recommendedWorkflow = "shirt";
+let userPresetIds = new Set();
 let historyJobsCache = [];
 let historyBatchesCache = [];
 let activeEventSource = null;
@@ -328,6 +342,125 @@ const presets = {
   },
 };
 
+const workflowPresets = {
+  shirt: {
+    presetKey: "print",
+    workflowNote: "Shirt Design applies a transparent PNG workflow and pads the final art to 4500 x 5400.",
+    note: "Shirt Design removes the background first, then upscales to a standard 4500 x 5400 transparent shirt canvas.",
+    tool: "remove-background-upscale",
+    mode: "conservative",
+    model: "logo",
+    cut: "balanced",
+    scale: "4",
+    sizing: "target",
+    targetPreset: shirtTarget.preset,
+    targetWidth: shirtTarget.width,
+    targetHeight: shirtTarget.height,
+    targetFit: shirtTarget.fit,
+    resizeMethod: "preserve",
+    sharpenAmount: "65",
+    dpi: "300",
+    exportQuality: "95",
+    denoise: "0.35",
+    edgeTrim: "2",
+    fringeCleanup: "65",
+    innerCleanup: "45",
+    alphaMatting: false,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  sticker: {
+    presetKey: "logo",
+    workflowNote: "Sticker / Logo protects lettering, checks halos, and keeps the result transparent.",
+    note: "Sticker / Logo keeps hard edges clean and prepares a transparent 3000 x 3000 output.",
+    tool: "remove-background-upscale",
+    mode: "conservative",
+    model: "logo",
+    cut: "preserve",
+    scale: "4",
+    sizing: "target",
+    targetPreset: "3000x3000",
+    targetWidth: "3000",
+    targetHeight: "3000",
+    targetFit: "pad",
+    resizeMethod: "preserve",
+    sharpenAmount: "70",
+    dpi: "300",
+    exportQuality: "95",
+    denoise: "0.25",
+    edgeTrim: "2",
+    fringeCleanup: "70",
+    innerCleanup: "35",
+    alphaMatting: false,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  product: {
+    presetKey: "product",
+    workflowNote: "Product Photo cuts out the subject and prepares a square listing-friendly result.",
+    note: "Product Photo uses a stronger subject model and exports a transparent product listing image.",
+    tool: "remove-background-upscale",
+    mode: "photo",
+    model: "accurate",
+    cut: "balanced",
+    scale: "4",
+    sizing: "target",
+    targetPreset: "1600x1600",
+    targetWidth: "1600",
+    targetHeight: "1600",
+    targetFit: "pad",
+    resizeMethod: "lanczos",
+    sharpenAmount: "55",
+    dpi: "300",
+    exportQuality: "92",
+    denoise: "0.45",
+    edgeTrim: "1",
+    fringeCleanup: "40",
+    innerCleanup: "25",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
+  web: {
+    presetKey: "photo",
+    workflowNote: "Web / Listing Image keeps the background and targets a smaller web-ready file.",
+    note: "Web / Listing Image upscales or resizes to a 1600 x 1600 WebP for faster pages and listings.",
+    tool: "upscale",
+    mode: "auto",
+    model: "auto",
+    cut: "balanced",
+    scale: "2",
+    sizing: "target",
+    targetPreset: "1600x1600",
+    targetWidth: "1600",
+    targetHeight: "1600",
+    targetFit: "contain",
+    resizeMethod: "lanczos",
+    sharpenAmount: "55",
+    dpi: "72",
+    exportQuality: "90",
+    denoise: "0.4",
+    edgeTrim: "0",
+    fringeCleanup: "0",
+    innerCleanup: "0",
+    alphaMatting: true,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "webp",
+  },
+  custom: {
+    presetKey: "",
+    workflowNote: "Custom leaves the current settings alone and opens Pro controls for manual tuning.",
+  },
+};
+
 function selectedExperienceMode() {
   return document.querySelector('input[name="experience_mode"]:checked')?.value || "beginner";
 }
@@ -355,6 +488,84 @@ function syncPresetCards() {
     card.classList.toggle("active", active);
     card.setAttribute("aria-pressed", active ? "true" : "false");
   });
+  syncUserPresetActions();
+}
+
+function syncWorkflowCards() {
+  workflowCards.forEach((card) => {
+    const active = card.dataset.workflowChoice === activeWorkflow;
+    card.classList.toggle("active", active);
+    card.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+}
+
+function syncUserPresetActions() {
+  const selected = presetSelect?.value || "";
+  deletePresetButton?.classList.toggle("hidden", !userPresetIds.has(selected));
+}
+
+function applyWorkflow(key, fromUser = false) {
+  const workflow = workflowPresets[key] || workflowPresets.shirt;
+  activeWorkflow = key in workflowPresets ? key : "shirt";
+  syncWorkflowCards();
+  if (workflowNote) workflowNote.textContent = workflow.workflowNote || "Custom workflow selected.";
+  if (activeWorkflow === "custom") {
+    setExperienceMode("pro");
+    if (fromUser) setStatus("Ready", "ready", "Custom workflow selected. Tune settings manually.");
+    return;
+  }
+  if (workflow.presetKey && presetSelect.querySelector(`option[value="${workflow.presetKey}"]`)) {
+    presetSelect.value = workflow.presetKey;
+  }
+  applyPresetValues(workflow, activeWorkflow, fromUser);
+}
+
+function applyPresetValues(preset, key = "", fromUser = false) {
+  const base = presets.smart;
+  const merged = { ...base, ...preset };
+  if (merged.tool) setRadioValue("tool", merged.tool);
+  setRadioValue("scale", merged.scale);
+  setRadioValue("sizing", merged.sizing);
+  setRadioValue("cut_mode", merged.cut);
+  applyCutPreset(false);
+  document.querySelector("#mode").value = merged.mode;
+  bgModel.value = merged.model;
+  denoise.value = merged.denoise;
+  edgeTrim.value = merged.edgeTrim;
+  fringeCleanup.value = merged.fringeCleanup;
+  innerCleanup.value = merged.innerCleanup;
+  outputFormat.value = merged.format;
+  resizeMethodSelect.value = merged.resizeMethod || "lanczos";
+  targetPresetSelect.value = merged.targetPreset || "";
+  targetWidthInput.value = merged.targetWidth || "";
+  targetHeightInput.value = merged.targetHeight || "";
+  targetFitSelect.value = merged.targetFit || shirtTarget.fit;
+  sharpenAmount.value = merged.sharpenAmount || "70";
+  dpiInput.value = merged.dpi || "300";
+  exportQuality.value = merged.exportQuality || "95";
+  canvasPresetSelect.value = "";
+  canvasWidthInput.value = merged.canvasWidth || "";
+  canvasHeightInput.value = merged.canvasHeight || "";
+  canvasAnchorSelect.value = merged.canvasAnchor || "center";
+  setCheckbox("alpha-matting", merged.alphaMatting);
+  setCheckbox("post-process-mask", merged.postProcess);
+  setCheckbox("preserve-interior", merged.preserveInterior);
+  setCheckbox("respect-alpha", merged.respectAlpha);
+  updateDenoiseValue();
+  updateEdgeTrimValue();
+  updateFringeCleanupValue();
+  updateInnerCleanupValue();
+  updateSharpenValue();
+  updateExportQualityValue();
+  updatePrintSizeNote();
+  syncToolUi();
+  syncSizingUi(key === "print");
+  syncPresetCards();
+  presetNote.textContent = merged.note || "Preset loaded.";
+  if (selectedFile && fromUser) {
+    clearResultOnly();
+    validateResolutionForCurrentSettings("Settings updated. Start when ready.");
+  }
 }
 
 function detectImageIntent(file, size) {
@@ -365,17 +576,21 @@ function detectImageIntent(file, size) {
     name.includes("shirt") ||
     name.includes("graphic") ||
     name.includes("transparent");
-  const looksLikeProduct = name.includes("product") || name.includes("mockup") || name.includes("item");
-  if (looksLikeProduct) return { type: "product photo", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400" };
-  if (looksLikeGraphic) return { type: "logo or shirt graphic", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400" };
-  return { type: "photo or artwork", tool: "upscale", output: "Shirt PNG 4500 x 5400" };
+  const looksLikeProduct = name.includes("product") || name.includes("mockup") || name.includes("item") || name.includes("listing");
+  const looksLikeWeb = name.includes("web") || name.includes("banner") || name.includes("listing");
+  const squareish = size?.width && size?.height && Math.abs(size.width - size.height) / Math.max(size.width, size.height) < 0.08;
+  if (looksLikeProduct) return { type: "product photo", workflow: "product", tool: "remove-background-upscale", output: "Product listing 1600 x 1600", format: "PNG" };
+  if (looksLikeWeb) return { type: "web or listing image", workflow: "web", tool: "upscale", output: "Web listing 1600 x 1600", format: "WebP" };
+  if (looksLikeGraphic || squareish) return { type: "logo, sticker, or shirt graphic", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
+  return { type: "photo or artwork", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
 }
 
 function showRecommendation(file, size) {
   if (!recommendationCard || !file) return;
   const intent = detectImageIntent(file, size);
+  recommendedWorkflow = intent.workflow || "shirt";
   recommendationTitle.textContent = `Detected: ${intent.type}`;
-  recommendationCopy.textContent = `Suggested: ${toolLabel(intent.tool)} | Output: ${intent.output} | Format: PNG`;
+  recommendationCopy.textContent = `Suggested: ${toolLabel(intent.tool)} | Output: ${intent.output} | Format: ${intent.format}`;
   recommendationCard.classList.remove("hidden");
 }
 
@@ -592,49 +807,7 @@ function setShirtTargetDefaults() {
 
 function applyPreset(key, fromUser = false) {
   const preset = presets[key] || presets.smart;
-  if (preset.tool) setRadioValue("tool", preset.tool);
-  setRadioValue("scale", preset.scale);
-  setRadioValue("sizing", preset.sizing);
-  setRadioValue("cut_mode", preset.cut);
-  applyCutPreset(false);
-  document.querySelector("#mode").value = preset.mode;
-  bgModel.value = preset.model;
-  denoise.value = preset.denoise;
-  edgeTrim.value = preset.edgeTrim;
-  fringeCleanup.value = preset.fringeCleanup;
-  innerCleanup.value = preset.innerCleanup;
-  outputFormat.value = preset.format;
-  resizeMethodSelect.value = preset.resizeMethod || "lanczos";
-  targetPresetSelect.value = preset.targetPreset || "";
-  targetWidthInput.value = preset.targetWidth || "";
-  targetHeightInput.value = preset.targetHeight || "";
-  targetFitSelect.value = preset.targetFit || shirtTarget.fit;
-  sharpenAmount.value = preset.sharpenAmount || "70";
-  dpiInput.value = preset.dpi || "300";
-  exportQuality.value = preset.exportQuality || "95";
-  canvasPresetSelect.value = "";
-  canvasWidthInput.value = preset.canvasWidth || "";
-  canvasHeightInput.value = preset.canvasHeight || "";
-  canvasAnchorSelect.value = preset.canvasAnchor || "center";
-  setCheckbox("alpha-matting", preset.alphaMatting);
-  setCheckbox("post-process-mask", preset.postProcess);
-  setCheckbox("preserve-interior", preset.preserveInterior);
-  setCheckbox("respect-alpha", preset.respectAlpha);
-  updateDenoiseValue();
-  updateEdgeTrimValue();
-  updateFringeCleanupValue();
-  updateInnerCleanupValue();
-  updateSharpenValue();
-  updateExportQualityValue();
-  updatePrintSizeNote();
-  syncToolUi();
-  syncSizingUi(key === "print");
-  syncPresetCards();
-  presetNote.textContent = preset.note;
-  if (selectedFile && fromUser) {
-    clearResultOnly();
-    validateResolutionForCurrentSettings("Preset updated. Start when ready.");
-  }
+  applyPresetValues(preset, key, fromUser);
 }
 
 function applySmartPresetForFile(file, size) {
@@ -923,6 +1096,7 @@ async function setFile(file) {
   afterImg.removeAttribute("src");
   afterEmpty.classList.remove("hidden");
   resultActions.classList.add("hidden");
+  hideResultReview();
   engineChip.classList.add("hidden");
 
   fileLabel.textContent = file.name;
@@ -1070,6 +1244,24 @@ function syncToolUi() {
   updatePrintSizeNote();
 }
 
+function hideResultReview() {
+  resultReview?.classList.add("hidden");
+  currentResultJob = null;
+}
+
+function showResultReview(job) {
+  currentResultJob = job || null;
+  const jobId = job?.queue_job_id || job?.id || currentQueueJobId;
+  if (jobId) currentQueueJobId = jobId;
+  resultReviewJob.textContent = jobId ? `Job ${String(jobId).slice(0, 8)}` : "Server job";
+  const hasBackground = job?.tool === "remove-background" || job?.tool === "remove-background-upscale";
+  quickFixButtons.forEach((button) => {
+    button.disabled = !hasBackground;
+    button.title = hasBackground ? "Reprocess the original source with adjusted background settings." : "Quick fixes are for background-removal jobs.";
+  });
+  resultReview?.classList.remove("hidden");
+}
+
 function clearResultOnly() {
   revoke(afterUrl);
   afterUrl = null;
@@ -1079,6 +1271,7 @@ function clearResultOnly() {
   afterMeta.textContent = "No result yet";
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
+  hideResultReview();
 }
 
 function clearWorkspace() {
@@ -1103,6 +1296,7 @@ function clearWorkspace() {
   inputChip.classList.add("hidden");
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
+  hideResultReview();
   batchResults.classList.add("hidden");
   batchResults.replaceChildren();
   hideRecommendation();
@@ -1337,6 +1531,7 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   const resolvedSource = absoluteUrl(sourceUrl);
   if (!resolvedResult) return;
   setActiveView("workspace");
+  hideResultReview();
 
   revoke(beforeUrl);
   revoke(afterUrl);
@@ -1403,6 +1598,7 @@ function queuedJobToResult(job) {
 
 function showQueuedJobResult(job) {
   if (!job?.download_url) throw new Error("Queued job finished without a result URL.");
+  currentQueueJobId = job.queue_job_id || job.id || currentQueueJobId;
   openStoredPreview({
     sourceUrl: job.source_download_url || job.source_url,
     resultUrl: job.download_url,
@@ -1415,6 +1611,7 @@ function showQueuedJobResult(job) {
     engineChip.className = `mini-badge ${String(job.engine).includes("CUDA") ? "good" : ""}`.trim();
     engineChip.classList.remove("hidden");
   }
+  showResultReview(job);
   return queuedJobToResult(job);
 }
 
@@ -2197,6 +2394,235 @@ async function loadDiagnostics() {
   }
 }
 
+function settingsSnapshotFromUi() {
+  return {
+    note: `User preset: ${toolLabel(selectedTool())}`,
+    tool: selectedTool(),
+    mode: document.querySelector("#mode").value,
+    model: bgModel.value,
+    cut: selectedCutMode(),
+    scale: String(selectedScale()),
+    sizing: selectedSizingMode(),
+    targetPreset: targetPresetSelect.value,
+    targetWidth: targetWidthInput.value,
+    targetHeight: targetHeightInput.value,
+    targetFit: targetFitSelect.value,
+    resizeMethod: resizeMethodSelect.value,
+    sharpenAmount: sharpenAmount.value,
+    dpi: dpiInput.value,
+    exportQuality: exportQuality.value,
+    canvasWidth: canvasWidthInput.value,
+    canvasHeight: canvasHeightInput.value,
+    canvasAnchor: canvasAnchorSelect.value,
+    denoise: denoise.value,
+    edgeTrim: edgeTrim.value,
+    fringeCleanup: fringeCleanup.value,
+    innerCleanup: innerCleanup.value,
+    alphaMatting: document.querySelector("#alpha-matting").checked,
+    postProcess: document.querySelector("#post-process-mask").checked,
+    preserveInterior: document.querySelector("#preserve-interior").checked,
+    respectAlpha: document.querySelector("#respect-alpha").checked,
+    format: outputFormat.value,
+  };
+}
+
+function userPresetDescription(snapshot) {
+  const target = snapshot.sizing === "target" && (snapshot.targetWidth || snapshot.targetHeight)
+    ? `${snapshot.targetWidth || "auto"} x ${snapshot.targetHeight || "auto"}`
+    : `${snapshot.scale || "1"}x`;
+  return `${toolLabel(snapshot.tool)} | ${target} | ${String(snapshot.format || "png").toUpperCase()}`;
+}
+
+function removeUserPresetUi() {
+  userPresetIds.forEach((id) => {
+    delete presets[id];
+  });
+  userPresetIds = new Set();
+  presetSelect.querySelectorAll("option[data-user-preset='true']").forEach((option) => option.remove());
+  presetCardGrid?.querySelectorAll(".user-preset-card").forEach((card) => card.remove());
+  presetCards = document.querySelectorAll("[data-preset-choice]");
+}
+
+function normalizeServerPreset(preset) {
+  const raw = preset.settings || {};
+  const base = raw.preset_key && presets[raw.preset_key] ? presets[raw.preset_key] : presets.smart;
+  return {
+    ...base,
+    ...raw,
+    note: preset.description || raw.note || `Saved preset: ${preset.name}`,
+  };
+}
+
+function addUserPresetUi(preset) {
+  const id = String(preset.id || "");
+  if (!id) return;
+  userPresetIds.add(id);
+  presets[id] = normalizeServerPreset(preset);
+
+  const option = document.createElement("option");
+  option.value = id;
+  option.dataset.userPreset = "true";
+  option.textContent = preset.name || "Saved preset";
+  presetSelect.append(option);
+
+  const card = document.createElement("button");
+  card.className = "preset-card user-preset-card";
+  card.type = "button";
+  card.dataset.presetChoice = id;
+  card.setAttribute("aria-pressed", "false");
+  const title = document.createElement("span");
+  title.textContent = preset.name || "Saved preset";
+  const copy = document.createElement("small");
+  copy.textContent = preset.description || "Saved server preset.";
+  card.append(title, copy);
+  presetCardGrid?.append(card);
+}
+
+async function loadPresets() {
+  try {
+    const response = await fetch("/api/presets", { cache: "no-store" });
+    if (!response.ok) throw new Error("presets failed");
+    const data = await response.json();
+    removeUserPresetUi();
+    (data.presets || []).filter((preset) => preset.kind === "user").forEach(addUserPresetUi);
+    presetCards = document.querySelectorAll("[data-preset-choice]");
+    syncPresetCards();
+  } catch {
+    setStatus("Ready", "ready", "Could not load saved presets. Built-in presets are still available.");
+  }
+}
+
+async function saveCurrentPreset() {
+  const name = (presetNameInput?.value || "").trim();
+  if (!name) {
+    setStatus("Error", "error", "Enter a preset name first.");
+    presetNameInput?.focus();
+    return;
+  }
+  const snapshot = settingsSnapshotFromUi();
+  try {
+    savePresetButton.disabled = true;
+    const response = await fetch("/api/presets", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        description: userPresetDescription(snapshot),
+        tool: snapshot.tool,
+        settings: snapshot,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || body.error || "Could not save preset.");
+    await loadPresets();
+    presetSelect.value = body.preset.id;
+    syncPresetCards();
+    presetNameInput.value = "";
+    setStatus("Ready", "ready", `Saved preset "${body.preset.name}".`);
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Could not save preset.");
+  } finally {
+    savePresetButton.disabled = false;
+  }
+}
+
+async function deleteSelectedPreset() {
+  const id = presetSelect.value;
+  if (!userPresetIds.has(id)) return;
+  if (!window.confirm("Delete this saved preset?")) return;
+  try {
+    deletePresetButton.disabled = true;
+    const response = await fetch(`/api/presets/${encodeURIComponent(id)}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || body.error || "Could not delete preset.");
+    presetSelect.value = "smart";
+    await loadPresets();
+    applyPreset("smart", true);
+    setStatus("Ready", "ready", "Saved preset deleted.");
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Could not delete preset.");
+  } finally {
+    deletePresetButton.disabled = false;
+  }
+}
+
+function handleReviewAction(action) {
+  if (!afterUrl) return;
+  if (action === "edge") {
+    setPreviewBackground("dark");
+    applyCompareZoom("fit");
+    openCompare({ mode: "slider" });
+    setStatus("Ready", "ready", "Inspecting edge cleanup on a dark background.");
+    return;
+  }
+  if (action === "transparent") {
+    setPreviewBackground("green");
+    applyCompareZoom("fit");
+    openCompare({ mode: "after" });
+    setStatus("Ready", "ready", "Transparency preview switched to green.");
+    return;
+  }
+  if (action === "detail") {
+    setPreviewBackground("checker");
+    applyCompareZoom("100");
+    openCompare({ mode: "slider" });
+    setStatus("Ready", "ready", "100% compare is open for lettering and detail checks.");
+    return;
+  }
+  if (action === "size") {
+    resultActions.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    setStatus("Ready", "ready", resultSummary.textContent || "Check the output size and format.");
+  }
+}
+
+async function reprocessWithQuickFix(quickFix) {
+  const jobId = currentResultJob?.queue_job_id || currentResultJob?.id || currentQueueJobId;
+  if (!jobId) {
+    setStatus("Error", "error", "No server queued job is available to reprocess.");
+    return;
+  }
+  const previousResultJob = currentResultJob;
+  try {
+    quickFixButtons.forEach((button) => {
+      button.disabled = true;
+    });
+    runButton.disabled = true;
+    hideResultReview();
+    setBusyStatus("Reprocessing on server");
+    setStatus("Processing", "busy", "Quick fix queued on the server. You can close this browser and return later.");
+    const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/reprocess`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quick_fix: quickFix }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || body.error || "Could not queue quick fix.");
+    const queuedJob = body.job;
+    currentQueueJobId = queuedJob.id;
+    renderBatchResults([queuedJobToResult(queuedJob)]);
+    setServerBusyStatus(
+      "Reprocessing on server",
+      queuedJob,
+      `Quick fix queued as job ${String(queuedJob.id || "").slice(0, 8)}. Docker keeps processing without the browser.`,
+    );
+    const completed = await pollQueuedJob(queuedJob.id);
+    showQueuedJobResult(completed);
+    renderBatchResults([]);
+    await loadHistory();
+    await loadDiagnostics();
+    setStatus("Complete", "complete", "Quick fix complete. Review the updated result.");
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Quick fix failed.");
+  } finally {
+    clearBusyStatus();
+    if (selectedFile && validateResolutionForCurrentSettings(null)) {
+      runButton.disabled = false;
+    }
+    syncRunLabel();
+    if (currentResultJob || previousResultJob) showResultReview(currentResultJob || previousResultJob);
+  }
+}
+
 fileInput.addEventListener("change", () => setFiles(fileInput.files));
 
 presetSelect.addEventListener("change", () => {
@@ -2204,13 +2630,25 @@ presetSelect.addEventListener("change", () => {
   syncPresetCards();
 });
 
-presetCards.forEach((card) => {
-  card.addEventListener("click", () => {
+presetCardGrid?.addEventListener("click", (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const card = target?.closest("[data-preset-choice]");
+  if (card instanceof HTMLElement) {
     presetSelect.value = card.dataset.presetChoice || "smart";
     applyPreset(presetSelect.value, true);
     syncPresetCards();
+  }
+});
+
+workflowCards.forEach((card) => {
+  card.addEventListener("click", () => {
+    applyWorkflow(card.dataset.workflowChoice || "shirt", true);
+    setStatus("Ready", "ready", "Workflow settings applied. Start when ready.");
   });
 });
+
+savePresetButton?.addEventListener("click", saveCurrentPreset);
+deletePresetButton?.addEventListener("click", deleteSelectedPreset);
 
 experienceInputs.forEach((input) => input.addEventListener("change", syncExperienceMode));
 
@@ -2222,11 +2660,10 @@ advancedWorkflowCard?.addEventListener("click", () => {
 
 useRecommendation?.addEventListener("click", () => {
   if (!selectedFile) return;
-  presetSelect.value = "smart";
-  if (selectedImageSize) applySmartPresetForFile(selectedFile, selectedImageSize);
+  applyWorkflow(recommendedWorkflow || "shirt", true);
   syncPresetCards();
   syncToolUi();
-  setStatus("Ready", "ready", "Smart Auto settings applied. Start when ready.");
+  setStatus("Ready", "ready", "Recommended workflow applied. Start when ready.");
 });
 
 toolInputs.forEach((input) => input.addEventListener("change", syncToolUi));
@@ -2386,6 +2823,12 @@ outputFormat.addEventListener("change", () => {
 cutModeInputs.forEach((input) => input.addEventListener("change", applyCutPreset));
 processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
+reviewCheckButtons.forEach((button) => {
+  button.addEventListener("click", () => handleReviewAction(button.dataset.reviewAction));
+});
+quickFixButtons.forEach((button) => {
+  button.addEventListener("click", () => reprocessWithQuickFix(button.dataset.quickFix));
+});
 compareSlider.addEventListener("input", () => setComparePosition(compareSlider.value));
 compareModeSelect.addEventListener("change", () => {
   applyCompareMode(compareModeSelect.value);
@@ -2685,8 +3128,7 @@ updateCompareAvailability();
 setPreviewBackground("checker");
 setActiveView("workspace");
 syncExperienceMode();
-syncPresetCards();
-syncSizingUi();
-syncToolUi();
+applyWorkflow("shirt", false);
+loadPresets();
 loadRuntime();
 resumeRunningJobs();
