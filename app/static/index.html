@@ -5,22 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Imagine Clarity | Image Tools</title>
     <link rel="icon" href="/static/brand-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260513a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260618l" />
   </head>
   <body>
     <main class="page-shell">
-      <header class="header">
+      <header class="header hero-header">
         <div class="brand">
           <a class="brand-logo-link" href="/" aria-label="Imagine Clarity home">
             <img class="brand-mark" src="/static/brand-mark.svg" alt="" aria-hidden="true" />
           </a>
           <div class="brand-copy">
-            <span class="brand-kicker">Creator image tools</span>
-            <h1>Imagine Clarity</h1>
-            <p class="subtitle">Upscale, cut out, and export print-ready images in a few clicks.</p>
+            <span class="brand-kicker">PrintForge Creator Studio</span>
+            <h1>Shop-ready images without the guesswork.</h1>
+            <p class="subtitle">Drop in rough art, product photos, or logos. Imagine Clarity recommends the right workflow and exports transparent assets for prints, listings, and mockups.</p>
+            <div class="hero-benefits" aria-label="Output benefits">
+              <span>Transparent PNG</span>
+              <span>Print-ready sizing</span>
+              <span>Background cleanup</span>
+              <span>Recent assets saved</span>
+            </div>
           </div>
         </div>
-        <div class="header-actions">
+        <div class="header-actions hero-status-card">
+          <span class="status-label">Studio status</span>
           <span id="status" class="status-badge neutral">Ready</span>
           <span id="runtime-chip" class="runtime-badge neutral">Checking runtime</span>
           <button class="small-button system-button" type="button" data-view-target="diagnostics" aria-label="Open system diagnostics">System</button>
@@ -28,15 +35,28 @@
       </header>
 
       <nav class="view-nav" aria-label="Main sections">
-        <button class="view-tab active" type="button" data-view-target="workspace" aria-selected="true">Process</button>
-        <button class="view-tab" type="button" data-view-target="jobs" aria-selected="false">History</button>
+        <button class="view-tab active" type="button" data-view-target="workspace" aria-selected="true">Create</button>
+        <button class="view-tab" type="button" data-view-target="jobs" aria-selected="false">Recent Assets</button>
       </nav>
 
       <section id="workspace-view" class="app-view active" data-view="workspace">
-        <div class="view-intro">
-          <strong>Start here</strong>
-          <span>Drop in an image, pick what you are making, and let Smart Auto handle the safe defaults.</span>
+        <div class="view-intro creator-intro">
+          <strong>Start with the outcome</strong>
+          <span>Choose what you are making, then the studio handles the safe defaults. Pro controls stay available when you need them.</span>
         </div>
+
+        <aside id="workflow-assistant" class="workflow-assistant" aria-live="polite">
+          <div class="assistant-status">
+            <span id="assistant-step" class="assistant-step">Step 1 of 4</span>
+            <strong id="assistant-title">Add an image to begin</strong>
+            <span id="assistant-detail">Drop anywhere, paste from clipboard, or click Upload.</span>
+          </div>
+          <div class="assistant-actions">
+            <button id="assistant-secondary" class="ghost-button" type="button">History</button>
+            <button id="assistant-primary" class="primary-button" type="button">Upload Image</button>
+          </div>
+        </aside>
+
 
         <div class="layout">
         <form id="controls" class="card sidebar">
@@ -55,7 +75,7 @@
               <input id="file" type="file" name="image" accept="image/png,image/jpeg,image/webp,image/tiff" multiple />
               <span class="drop-icon" aria-hidden="true"></span>
               <span id="file-label" class="drop-title">Drop your image here</span>
-              <span id="file-meta" class="drop-copy">or click to browse</span>
+              <span id="file-meta" class="drop-copy">or click to browse, drag anywhere, or paste with Ctrl+V</span>
               <span id="drop-note" class="drop-note">PNG, JPG, WEBP, or TIFF supported. Max 16K x 16K per side.</span>
             </label>
             <p class="trust-note">Your original file is never changed.</p>
@@ -86,22 +106,32 @@
               <span class="label">What are you making?</span>
               <div id="workflow-cards" class="workflow-card-grid" role="group" aria-label="Workflow type">
                 <button class="workflow-card active" type="button" data-workflow-choice="shirt" aria-pressed="true">
+                  <span class="workflow-icon" aria-hidden="true">T</span>
                   <span>Shirt Design</span>
                   <small>Transparent PNG on a 4500 x 5400 canvas.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="sticker" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">S</span>
                   <span>Sticker / Logo</span>
                   <small>Clean edges, protected lettering, transparent output.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="product" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">P</span>
                   <span>Product Photo</span>
                   <small>Cut out the item and prep a clean listing image.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="web" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">W</span>
                   <span>Web / Listing Image</span>
                   <small>Fast sRGB output with smaller WebP/JPEG options.</small>
                 </button>
+                <button class="workflow-card workflow-card-featured" type="button" data-workflow-choice="printforge" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">PF</span>
+                  <span>PrintForge Product Prep</span>
+                  <small>Fast product-ready transparent PNGs for shop listings and mockups.</small>
+                </button>
                 <button class="workflow-card" type="button" data-workflow-choice="custom" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">+</span>
                   <span>Custom</span>
                   <small>Keep your current settings and tune manually.</small>
                 </button>
@@ -826,13 +856,19 @@
           </div>
         </article>
       </section>
+      <div id="global-drop-overlay" class="global-drop-overlay" aria-hidden="true">
+        <div>
+          <strong>Drop to start processing</strong>
+          <span>Images dropped anywhere on the page will load into Imagine Clarity.</span>
+        </div>
+      </div>
       <footer class="app-footer">
         <span>Imagine Clarity</span>
-        <span>Build 2026.05.13a</span>
-        <span>Diagnostics live under System.</span>
+        <span>Build 2026.06.18a</span>
+        <span>Drag anywhere or paste an image with Ctrl+V.</span>
       </footer>
     </main>
 
-    <script src="/static/app.js?v=20260513a"></script>
+    <script src="/static/app.js?v=20260618m"></script>
   </body>
 </html>
