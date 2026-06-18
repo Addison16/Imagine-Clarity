@@ -114,6 +114,13 @@ const diagnosticsPanel = document.querySelector("#diagnostics-panel");
 const refreshDiagnostics = document.querySelector("#refresh-diagnostics");
 const viewTabs = document.querySelectorAll("[data-view-target]");
 const appViews = document.querySelectorAll(".app-view");
+const workflowAssistant = document.querySelector("#workflow-assistant");
+const assistantStep = document.querySelector("#assistant-step");
+const assistantTitle = document.querySelector("#assistant-title");
+const assistantDetail = document.querySelector("#assistant-detail");
+const assistantPrimary = document.querySelector("#assistant-primary");
+const assistantSecondary = document.querySelector("#assistant-secondary");
+const globalDropOverlay = document.querySelector("#global-drop-overlay");
 
 let selectedFile = null;
 let selectedFiles = [];
@@ -455,6 +462,34 @@ const workflowPresets = {
     respectAlpha: true,
     format: "webp",
   },
+  printforge: {
+    presetKey: "product",
+    workflowNote: "PrintForge Product Prep cuts out product art, keeps detail protected, and exports clean shop-ready PNGs.",
+    note: "PrintForge Product Prep creates transparent 3000 x 3000 PNGs that work well for listings, mockups, and reusable product assets.",
+    tool: "remove-background-upscale",
+    mode: "conservative",
+    model: "logo",
+    cut: "preserve",
+    scale: "4",
+    sizing: "target",
+    targetPreset: "3000x3000",
+    targetWidth: "3000",
+    targetHeight: "3000",
+    targetFit: "pad",
+    resizeMethod: "preserve",
+    sharpenAmount: "70",
+    dpi: "300",
+    exportQuality: "95",
+    denoise: "0.25",
+    edgeTrim: "2",
+    fringeCleanup: "70",
+    innerCleanup: "45",
+    alphaMatting: false,
+    postProcess: true,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "png",
+  },
   custom: {
     presetKey: "",
     workflowNote: "Custom leaves the current settings alone and opens Pro controls for manual tuning.",
@@ -507,6 +542,10 @@ function syncUserPresetActions() {
 function applyWorkflow(key, fromUser = false) {
   const workflow = workflowPresets[key] || workflowPresets.shirt;
   activeWorkflow = key in workflowPresets ? key : "shirt";
+  if (fromUser) {
+    recommendedWorkflow = activeWorkflow;
+    hideRecommendation();
+  }
   syncWorkflowCards();
   if (workflowNote) workflowNote.textContent = workflow.workflowNote || "Custom workflow selected.";
   if (activeWorkflow === "custom") {
@@ -580,6 +619,7 @@ function detectImageIntent(file, size) {
   const looksLikeWeb = name.includes("web") || name.includes("banner") || name.includes("listing");
   const squareish = size?.width && size?.height && Math.abs(size.width - size.height) / Math.max(size.width, size.height) < 0.08;
   if (looksLikeProduct) return { type: "product photo", workflow: "product", tool: "remove-background-upscale", output: "Product listing 1600 x 1600", format: "PNG" };
+  if (name.includes("printforge") || name.includes("shop") || name.includes("store")) return { type: "PrintForge product asset", workflow: "printforge", tool: "remove-background-upscale", output: "Shop PNG 3000 x 3000", format: "PNG" };
   if (looksLikeWeb) return { type: "web or listing image", workflow: "web", tool: "upscale", output: "Web listing 1600 x 1600", format: "WebP" };
   if (looksLikeGraphic || squareish) return { type: "logo, sticker, or shirt graphic", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
   return { type: "photo or artwork", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
@@ -602,6 +642,7 @@ function setStatus(message, state = "ready", detail = "") {
   statusEl.textContent = message;
   statusEl.className = `status-badge ${state}`.trim();
   if (detail) statusDetail.textContent = detail;
+  syncWorkflowAssistant();
 }
 
 function setRuntime(message, state = "neutral") {
@@ -750,6 +791,52 @@ function bindImageDropTarget(element) {
     dragDepth = 0;
     element.classList.remove("dragging");
     setFiles(event.dataTransfer.files);
+  });
+}
+
+function bindGlobalImageDrop() {
+  if (!globalDropOverlay) return;
+  let dragDepth = 0;
+
+  document.addEventListener("dragenter", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    globalDropOverlay.classList.add("active");
+  });
+
+  document.addEventListener("dragover", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    globalDropOverlay.classList.add("active");
+  });
+
+  document.addEventListener("dragleave", (event) => {
+    if (!hasFileDrag(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) globalDropOverlay.classList.remove("active");
+  });
+
+  document.addEventListener("drop", (event) => {
+    if (!hasFileDrag(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    globalDropOverlay.classList.remove("active");
+    setFiles(event.dataTransfer.files);
+  });
+}
+
+function bindClipboardUpload() {
+  document.addEventListener("paste", (event) => {
+    const target = event.target;
+    const typing = target?.closest?.("input, textarea, select, [contenteditable='true']");
+    if (typing) return;
+    const files = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith("image/"));
+    if (!files.length) return;
+    event.preventDefault();
+    setFiles(files);
+    setStatus("Ready", "ready", files.length > 1 ? `${files.length} pasted images loaded.` : "Pasted image loaded. Choose settings and start.");
   });
 }
 
@@ -993,7 +1080,71 @@ function validateResolutionForCurrentSettings(validDetail = null) {
 
   runButton.disabled = false;
   if (validDetail) setStatus("Ready", "ready", validDetail);
+  syncWorkflowAssistant();
   return true;
+}
+
+function selectedWorkflowLabel() {
+  const active = document.querySelector(`[data-workflow-choice="${activeWorkflow}"] span:not(.workflow-icon)`);
+  return active?.textContent?.trim() || "Current workflow";
+}
+
+function hasResultReady() {
+  return resultActions && !resultActions.classList.contains("hidden");
+}
+
+function recommendationAvailable() {
+  return recommendationCard && !recommendationCard.classList.contains("hidden") && recommendedWorkflow !== activeWorkflow;
+}
+
+function syncWorkflowAssistant() {
+  if (!workflowAssistant) return;
+  const statusState = statusEl?.className || "";
+  workflowAssistant.classList.toggle("busy", statusState.includes("busy"));
+  workflowAssistant.classList.toggle("complete", statusState.includes("complete"));
+  workflowAssistant.classList.toggle("error", statusState.includes("error"));
+
+  if (!selectedFile) {
+    assistantStep.textContent = "Step 1 of 4";
+    assistantTitle.textContent = "Add an image to begin";
+    assistantDetail.textContent = "Drop anywhere, paste from clipboard, or click Upload.";
+    assistantPrimary.textContent = "Upload Image";
+    assistantPrimary.disabled = false;
+    return;
+  }
+
+  if (statusState.includes("busy")) {
+    assistantStep.textContent = "Step 3 of 4";
+    assistantTitle.textContent = "Processing in Docker";
+    assistantDetail.textContent = processingDetail?.textContent || "The server job is running. You can come back in History if needed.";
+    assistantPrimary.textContent = "Processing...";
+    assistantPrimary.disabled = true;
+    return;
+  }
+
+  if (hasResultReady()) {
+    assistantStep.textContent = "Step 4 of 4";
+    assistantTitle.textContent = "Result ready";
+    assistantDetail.textContent = resultSummary?.textContent || "Download, compare, or reprocess with a quick fix.";
+    assistantPrimary.textContent = "Download Result";
+    assistantPrimary.disabled = false;
+    return;
+  }
+
+  if (recommendationAvailable()) {
+    assistantStep.textContent = "Step 2 of 4";
+    assistantTitle.textContent = "Review the recommendation";
+    assistantDetail.textContent = recommendationCopy?.textContent || "Use the suggested workflow or keep your current settings.";
+    assistantPrimary.textContent = "Use Recommended";
+    assistantPrimary.disabled = false;
+    return;
+  }
+
+  assistantStep.textContent = "Step 3 of 4";
+  assistantTitle.textContent = `${selectedWorkflowLabel()} is ready`;
+  assistantDetail.textContent = statusDetail?.textContent || "Start processing when the settings look right.";
+  assistantPrimary.textContent = actionText();
+  assistantPrimary.disabled = runButton.disabled;
 }
 
 function imageSize(url) {
@@ -2862,6 +3013,26 @@ previewBgButtons.forEach((button) => {
 
 bindImageDropTarget(dropzone);
 bindImageDropTarget(beforeStage);
+bindGlobalImageDrop();
+bindClipboardUpload();
+
+assistantPrimary?.addEventListener("click", () => {
+  if (!selectedFile) {
+    fileInput.click();
+    return;
+  }
+  if (recommendationAvailable()) {
+    useRecommendation.click();
+    return;
+  }
+  if (hasResultReady()) {
+    resultDownload.click();
+    return;
+  }
+  if (!runButton.disabled) form.requestSubmit();
+});
+
+assistantSecondary?.addEventListener("click", () => setActiveView("jobs"));
 
 function endpointForTool(tool) {
   if (tool === "remove-background") return "/api/remove-background";
@@ -3132,3 +3303,4 @@ applyWorkflow("shirt", false);
 loadPresets();
 loadRuntime();
 resumeRunningJobs();
+syncWorkflowAssistant();
