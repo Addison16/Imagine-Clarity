@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import os
+import time
 
 from rq import Worker
 
@@ -32,8 +33,22 @@ def main() -> None:
         process.start()
         workers.append(process)
 
-    for process in workers:
-        process.join()
+    try:
+        while True:
+            for process in workers:
+                if process.exitcode is None:
+                    continue
+                logger.error("Clarity worker process %s exited with code %s", process.name, process.exitcode)
+                raise SystemExit(process.exitcode or 1)
+            time.sleep(0.5)
+    finally:
+        for process in workers:
+            if process.is_alive():
+                process.terminate()
+        for process in workers:
+            process.join(timeout=5)
+            if process.is_alive():
+                process.kill()
 
 
 if __name__ == "__main__":

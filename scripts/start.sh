@@ -66,7 +66,7 @@ container_has_cuda() {
 
 start_cpu() {
   echo "Starting Clarity Image Tools with CPU support on port $PORT."
-  docker compose up --build -d
+  docker compose up --build -d --remove-orphans
 }
 
 USE_GPU=0
@@ -78,7 +78,7 @@ fi
 
 if [[ "$USE_GPU" == "1" ]]; then
   echo "Starting Clarity Image Tools with NVIDIA GPU support on port $PORT."
-  if ! docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d; then
+  if ! docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d --remove-orphans; then
     if [[ "$FORCE_GPU" == "1" ]]; then
       exit 1
     fi

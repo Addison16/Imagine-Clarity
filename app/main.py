@@ -24,10 +24,13 @@ from app.background import (
     BACKGROUND_MODELS,
     SUPPORTED_BG_FORMATS,
     BackgroundOptions,
+    normalize_background_options,
     remove_background,
 )
+from app.devices import runtime_info as get_runtime_info, runtime_recommendations
 from app.jobs import (
     HISTORY_LIMIT,
+    build_listing_pack,
     clear_jobs,
     delete_job,
     get_job,
@@ -36,6 +39,7 @@ from app.jobs import (
     save_job_result,
     source_path,
     storage_summary,
+    update_job_metadata,
 )
 from app.batch_jobs import batch_source_path, build_batch_zip, create_batch, get_batch, list_batches, retry_batch
 from app.queued_jobs import (
@@ -50,20 +54,24 @@ from app.queued_jobs import (
 )
 from app.job_queue import event_channel, now as queue_now, queue_health, redis_client, snapshot as queue_snapshot
 from app.presets import create_preset, delete_preset, list_presets
-from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, resolve_upscale_sizes, upscale_image
+from app.upscaler import SUPPORTED_FORMATS, UpscaleOptions, normalize_upscale_options, resolve_upscale_sizes, upscale_image
+from app.vectorizer import SUPPORTED_VECTOR_FORMATS, VectorizeOptions, normalize_vector_options, vectorize_image
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "64"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_IMAGE_DIMENSION = int(os.getenv("MAX_IMAGE_DIMENSION", "16384"))
+MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "64000000"))
+MAX_OUTPUT_PIXELS = int(os.getenv("MAX_OUTPUT_PIXELS", "64000000"))
+MAX_VECTOR_PIXELS = int(os.getenv("MAX_VECTOR_PIXELS", "25000000"))
 MAX_UPSCALE_FACTOR = 8.0
 MAX_BATCH_FILES = int(os.getenv("MAX_BATCH_FILES", "100"))
 MAX_BATCH_TOTAL_MB = int(os.getenv("MAX_BATCH_TOTAL_MB", "512"))
 MAX_BATCH_TOTAL_BYTES = MAX_BATCH_TOTAL_MB * 1024 * 1024
 API_KEY = os.getenv("CLARITY_API_KEY", "").strip()
 CORS_ORIGINS = [origin.strip() for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if origin.strip()]
-SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale")
+SUPPORTED_TOOLS = ("upscale", "remove-background", "remove-background-upscale", "vectorize")
 SUPPORTED_RESPONSE_MODES = ("image", "json")
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
@@ -78,7 +86,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS or ["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -96,11 +104,15 @@ def health() -> dict[str, object]:
         "status": "ok",
         "max_upload_mb": MAX_UPLOAD_MB,
         "max_image_dimension": MAX_IMAGE_DIMENSION,
+        "max_input_pixels": MAX_INPUT_PIXELS,
+        "max_output_pixels": MAX_OUTPUT_PIXELS,
+        "max_vector_pixels": MAX_VECTOR_PIXELS,
         "max_upscale_factor": MAX_UPSCALE_FACTOR,
         "max_batch_files": MAX_BATCH_FILES,
         "max_batch_total_mb": MAX_BATCH_TOTAL_MB,
         "upscale_formats": sorted(SUPPORTED_FORMATS),
         "background_formats": sorted(SUPPORTED_BG_FORMATS),
+        "vector_formats": sorted(SUPPORTED_VECTOR_FORMATS),
         "tools": list(SUPPORTED_TOOLS),
         "history_limit": HISTORY_LIMIT,
         "cors_allow_origins": CORS_ORIGINS or ["*"],
@@ -150,8 +162,20 @@ async def api_queue_job(
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
-    upscale_device: str = Form("auto"),
-    background_device: str = Form("auto"),
+    upscale_device: str | None = Form(None),
+    background_device: str | None = Form(None),
+    vector_preset: str = Form("logo"),
+    vector_colormode: str | None = Form(None),
+    vector_hierarchical: str | None = Form(None),
+    vector_mode: str | None = Form(None),
+    vector_filter_speckle: int | None = Form(None),
+    vector_color_precision: int | None = Form(None),
+    vector_layer_difference: int | None = Form(None),
+    vector_corner_threshold: int | None = Form(None),
+    vector_length_threshold: float | None = Form(None),
+    vector_max_iterations: int | None = Form(None),
+    vector_splice_threshold: int | None = Form(None),
+    vector_path_precision: int | None = Form(None),
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> JSONResponse:
@@ -192,16 +216,31 @@ async def api_queue_job(
             respect_existing_alpha=respect_existing_alpha,
             upscale_device=upscale_device,
             background_device=background_device,
+            vector_preset=vector_preset,
+            vector_colormode=vector_colormode,
+            vector_hierarchical=vector_hierarchical,
+            vector_mode=vector_mode,
+            vector_filter_speckle=vector_filter_speckle,
+            vector_color_precision=vector_color_precision,
+            vector_layer_difference=vector_layer_difference,
+            vector_corner_threshold=vector_corner_threshold,
+            vector_length_threshold=vector_length_threshold,
+            vector_max_iterations=vector_max_iterations,
+            vector_splice_threshold=vector_splice_threshold,
+            vector_path_precision=vector_path_precision,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    job = create_queued_job(
-        filename=image.filename or "image.png",
-        data=raw,
-        input_metadata=metadata,
-        tool=normalized_tool,
-        settings=settings,
-    )
+    try:
+        job = create_queued_job(
+            filename=image.filename or "image.png",
+            data=raw,
+            input_metadata=metadata,
+            tool=normalized_tool,
+            settings=settings,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(status_code=202, content={"job": job})
 
 
@@ -436,8 +475,20 @@ async def api_create_batch(
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
-    upscale_device: str = Form("auto"),
-    background_device: str = Form("auto"),
+    upscale_device: str | None = Form(None),
+    background_device: str | None = Form(None),
+    vector_preset: str = Form("logo"),
+    vector_colormode: str | None = Form(None),
+    vector_hierarchical: str | None = Form(None),
+    vector_mode: str | None = Form(None),
+    vector_filter_speckle: int | None = Form(None),
+    vector_color_precision: int | None = Form(None),
+    vector_layer_difference: int | None = Form(None),
+    vector_corner_threshold: int | None = Form(None),
+    vector_length_threshold: float | None = Form(None),
+    vector_max_iterations: int | None = Form(None),
+    vector_splice_threshold: int | None = Form(None),
+    vector_path_precision: int | None = Form(None),
     x_api_key: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
 ) -> dict[str, object]:
@@ -457,24 +508,62 @@ async def api_create_batch(
         metadatas.append(metadata)
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
-    if normalized_tool == "remove-background":
-        settings = vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format=output_format))
-    elif normalized_tool == "remove-background-upscale":
-        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=upscale_device, output_format=output_format, target_width=target_width, target_height=target_height, resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height, canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount)
-        try:
-            for metadata in metadatas:
-                _validate_upscale_resolution(metadata, upscale_options)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        settings = {"background": vars(BackgroundOptions(model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance, device=background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha, output_format="png")), "upscale": vars(upscale_options)}
-    else:
-        upscale_options = UpscaleOptions(scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile, device=device, output_format=output_format, target_width=target_width, target_height=target_height, resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height, canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount)
-        try:
-            for metadata in metadatas:
-                _validate_upscale_resolution(metadata, upscale_options)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        settings = vars(upscale_options)
+    try:
+        settings = _build_tool_settings(
+            normalized_tool=normalized_tool,
+            metadata=metadatas[0],
+            scale=scale,
+            mode=mode,
+            face_enhance=face_enhance,
+            denoise=denoise,
+            tile=tile,
+            device=device,
+            output_format=output_format,
+            target_width=target_width,
+            target_height=target_height,
+            resize_method=resize_method,
+            target_fit=target_fit,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            canvas_anchor=canvas_anchor,
+            dpi=dpi,
+            export_quality=export_quality,
+            sharpen_amount=sharpen_amount,
+            model=model,
+            cut_mode=cut_mode,
+            alpha_matting=alpha_matting,
+            edge_refine=edge_refine,
+            edge_trim=edge_trim,
+            fringe_cleanup=fringe_cleanup,
+            inner_cleanup=inner_cleanup,
+            background_tolerance=background_tolerance,
+            post_process_mask=post_process_mask,
+            preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha,
+            upscale_device=upscale_device,
+            background_device=background_device,
+            vector_preset=vector_preset,
+            vector_colormode=vector_colormode,
+            vector_hierarchical=vector_hierarchical,
+            vector_mode=vector_mode,
+            vector_filter_speckle=vector_filter_speckle,
+            vector_color_precision=vector_color_precision,
+            vector_layer_difference=vector_layer_difference,
+            vector_corner_threshold=vector_corner_threshold,
+            vector_length_threshold=vector_length_threshold,
+            vector_max_iterations=vector_max_iterations,
+            vector_splice_threshold=vector_splice_threshold,
+            vector_path_precision=vector_path_precision,
+        )
+        for metadata in metadatas[1:]:
+            if normalized_tool == "vectorize":
+                _validate_vector_resolution(metadata)
+            elif normalized_tool == "remove-background-upscale":
+                _validate_upscale_resolution(metadata, UpscaleOptions(**settings["upscale"]))
+            elif normalized_tool == "upscale":
+                _validate_upscale_resolution(metadata, UpscaleOptions(**settings))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     batch = create_batch(files, normalized_tool, settings)
     return {"batch": batch}
 
@@ -494,7 +583,11 @@ def api_retry_batch(
 
 
 @app.delete("/api/jobs")
-def api_clear_jobs() -> dict[str, object]:
+def api_clear_jobs(
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
     completed = clear_jobs()
     queued = clear_queued_jobs()
     return {
@@ -506,7 +599,12 @@ def api_clear_jobs() -> dict[str, object]:
 
 
 @app.delete("/api/jobs/{job_id}")
-def api_delete_job(job_id: str) -> dict[str, object]:
+def api_delete_job(
+    job_id: str,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
     queued = delete_queued_job(job_id)
     if queued is not None:
         if not queued.get("deleted"):
@@ -519,12 +617,54 @@ def api_delete_job(job_id: str) -> dict[str, object]:
 
 
 @app.get("/api/results/{job_id}")
-def api_result(job_id: str) -> FileResponse:
+def api_result(
+    job_id: str,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> FileResponse:
+    _require_api_key(x_api_key, authorization)
     path = result_path(job_id)
     if not path:
         raise HTTPException(status_code=404, detail="Result not found.")
     job = get_job(job_id) or {}
     return FileResponse(path, filename=str(job.get("filename") or path.name))
+
+
+@app.get("/api/results/{job_id}/listing-pack")
+def api_listing_pack(
+    job_id: str,
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
+    payload = build_listing_pack(job_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Result not found or listing pack could not be generated.")
+    data, filename = payload
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.patch("/api/jobs/{job_id}/metadata")
+def api_update_job_metadata(
+    job_id: str,
+    payload: dict[str, object] | None = Body(default=None),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_api_key(x_api_key, authorization)
+    body = payload or {}
+    updated = update_job_metadata(
+        job_id,
+        display_name=str(body.get("display_name")) if body.get("display_name") is not None else None,
+        note=str(body.get("note")) if body.get("note") is not None else None,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Saved job not found.")
+    return {"job": _completed_job_status(updated)}
 
 
 @app.get("/api/sources/{job_id}")
@@ -548,6 +688,9 @@ def api_diagnostics() -> dict[str, object]:
         "limits": {
             "max_upload_mb": MAX_UPLOAD_MB,
             "max_image_dimension": MAX_IMAGE_DIMENSION,
+            "max_input_pixels": MAX_INPUT_PIXELS,
+            "max_output_pixels": MAX_OUTPUT_PIXELS,
+            "max_vector_pixels": MAX_VECTOR_PIXELS,
             "max_upscale_factor": MAX_UPSCALE_FACTOR,
             "max_batch_files": MAX_BATCH_FILES,
             "max_batch_total_mb": MAX_BATCH_TOTAL_MB,
@@ -558,10 +701,11 @@ def api_diagnostics() -> dict[str, object]:
 
 @app.get("/api/capabilities")
 def api_capabilities() -> dict[str, object]:
+    runtime = _runtime_info()
     return {
         "tools": list(SUPPORTED_TOOLS),
         "response_modes": list(SUPPORTED_RESPONSE_MODES),
-        "output_formats": sorted(set(SUPPORTED_FORMATS) | set(SUPPORTED_BG_FORMATS)),
+        "output_formats": sorted(set(SUPPORTED_FORMATS) | set(SUPPORTED_BG_FORMATS) | set(SUPPORTED_VECTOR_FORMATS)),
         "batch": {
             "max_files": MAX_BATCH_FILES,
             "max_total_mb": MAX_BATCH_TOTAL_MB,
@@ -600,6 +744,16 @@ def api_capabilities() -> dict[str, object]:
             "cut_modes": sorted(BACKGROUND_CUT_MODES.keys()),
             "output_formats": sorted(SUPPORTED_BG_FORMATS),
         },
+        "vectorize": {
+            "engine": "vtracer",
+            "output_formats": sorted(SUPPORTED_VECTOR_FORMATS),
+            "presets": ["logo", "artwork", "photo", "line-art"],
+            "color_modes": ["color", "binary"],
+            "layering": ["stacked", "cutout"],
+            "curve_modes": ["spline", "polygon", "none"],
+        },
+        "runtime": runtime,
+        "recommendations": _runtime_recommendations(runtime),
         "security": {"api_key_enabled": bool(API_KEY)},
     }
 
@@ -636,25 +790,60 @@ def _build_tool_settings(
     post_process_mask: bool,
     preserve_interior: bool,
     respect_existing_alpha: bool,
-    upscale_device: str,
-    background_device: str,
+    upscale_device: str | None,
+    background_device: str | None,
+    vector_preset: str = "logo",
+    vector_colormode: str | None = None,
+    vector_hierarchical: str | None = None,
+    vector_mode: str | None = None,
+    vector_filter_speckle: int | None = None,
+    vector_color_precision: int | None = None,
+    vector_layer_difference: int | None = None,
+    vector_corner_threshold: int | None = None,
+    vector_length_threshold: float | None = None,
+    vector_max_iterations: int | None = None,
+    vector_splice_threshold: int | None = None,
+    vector_path_precision: int | None = None,
 ) -> dict[str, object]:
+    if normalized_tool == "vectorize":
+        _validate_vector_resolution(metadata)
+        return vars(
+            normalize_vector_options(
+                VectorizeOptions(
+                    preset=vector_preset,
+                    colormode=vector_colormode,
+                    hierarchical=vector_hierarchical,
+                    mode=vector_mode,
+                    filter_speckle=vector_filter_speckle,
+                    color_precision=vector_color_precision,
+                    layer_difference=vector_layer_difference,
+                    corner_threshold=vector_corner_threshold,
+                    length_threshold=vector_length_threshold,
+                    max_iterations=vector_max_iterations,
+                    splice_threshold=vector_splice_threshold,
+                    path_precision=vector_path_precision,
+                )
+            )
+        )
+
     if normalized_tool == "remove-background":
         return vars(
-            BackgroundOptions(
-                model=model,
-                cut_mode=cut_mode,
-                alpha_matting=alpha_matting,
-                edge_refine=edge_refine,
-                edge_trim=edge_trim,
-                fringe_cleanup=fringe_cleanup,
-                inner_cleanup=inner_cleanup,
-                background_tolerance=background_tolerance,
-                device=device,
-                post_process_mask=post_process_mask,
-                preserve_interior=preserve_interior,
-                respect_existing_alpha=respect_existing_alpha,
-                output_format=output_format,
+            normalize_background_options(
+                BackgroundOptions(
+                    model=model,
+                    cut_mode=cut_mode,
+                    alpha_matting=alpha_matting,
+                    edge_refine=edge_refine,
+                    edge_trim=edge_trim,
+                    fringe_cleanup=fringe_cleanup,
+                    inner_cleanup=inner_cleanup,
+                    background_tolerance=background_tolerance,
+                    device=background_device or device,
+                    post_process_mask=post_process_mask,
+                    preserve_interior=preserve_interior,
+                    respect_existing_alpha=respect_existing_alpha,
+                    output_format=output_format,
+                )
             )
         )
 
@@ -667,14 +856,60 @@ def _build_tool_settings(
         if normalized_format not in (SUPPORTED_FORMATS - {"jpeg", "jpg"}):
             raise ValueError("All-in-one output format must be png, webp, or tiff so transparency is preserved.")
 
-        upscale_options = UpscaleOptions(
+        upscale_options = normalize_upscale_options(
+            UpscaleOptions(
+                scale=scale,
+                mode=mode,
+                face_enhance=face_enhance,
+                denoise=denoise,
+                tile=tile,
+                device=upscale_device or device,
+                output_format=normalized_format,
+                target_width=target_width,
+                target_height=target_height,
+                resize_method=resize_method,
+                target_fit=target_fit,
+                canvas_width=canvas_width,
+                canvas_height=canvas_height,
+                canvas_anchor=canvas_anchor,
+                dpi=dpi,
+                export_quality=export_quality,
+                sharpen_amount=sharpen_amount,
+            )
+        )
+        _validate_upscale_resolution(metadata, upscale_options)
+        return {
+            "background": vars(
+                normalize_background_options(
+                    BackgroundOptions(
+                        model=model,
+                        cut_mode=cut_mode,
+                        alpha_matting=alpha_matting,
+                        edge_refine=edge_refine,
+                        edge_trim=edge_trim,
+                        fringe_cleanup=fringe_cleanup,
+                        inner_cleanup=inner_cleanup,
+                        background_tolerance=background_tolerance,
+                        device=background_device or device,
+                        post_process_mask=post_process_mask,
+                        preserve_interior=preserve_interior,
+                        respect_existing_alpha=respect_existing_alpha,
+                        output_format="png",
+                    )
+                )
+            ),
+            "upscale": vars(upscale_options),
+        }
+
+    upscale_options = normalize_upscale_options(
+        UpscaleOptions(
             scale=scale,
             mode=mode,
             face_enhance=face_enhance,
             denoise=denoise,
             tile=tile,
-            device=upscale_device,
-            output_format=normalized_format,
+            device=upscale_device or device,
+            output_format=output_format,
             target_width=target_width,
             target_height=target_height,
             resize_method=resize_method,
@@ -686,46 +921,6 @@ def _build_tool_settings(
             export_quality=export_quality,
             sharpen_amount=sharpen_amount,
         )
-        _validate_upscale_resolution(metadata, upscale_options)
-        return {
-            "background": vars(
-                BackgroundOptions(
-                    model=model,
-                    cut_mode=cut_mode,
-                    alpha_matting=alpha_matting,
-                    edge_refine=edge_refine,
-                    edge_trim=edge_trim,
-                    fringe_cleanup=fringe_cleanup,
-                    inner_cleanup=inner_cleanup,
-                    background_tolerance=background_tolerance,
-                    device=background_device,
-                    post_process_mask=post_process_mask,
-                    preserve_interior=preserve_interior,
-                    respect_existing_alpha=respect_existing_alpha,
-                    output_format="png",
-                )
-            ),
-            "upscale": vars(upscale_options),
-        }
-
-    upscale_options = UpscaleOptions(
-        scale=scale,
-        mode=mode,
-        face_enhance=face_enhance,
-        denoise=denoise,
-        tile=tile,
-        device=device,
-        output_format=output_format,
-        target_width=target_width,
-        target_height=target_height,
-        resize_method=resize_method,
-        target_fit=target_fit,
-        canvas_width=canvas_width,
-        canvas_height=canvas_height,
-        canvas_anchor=canvas_anchor,
-        dpi=dpi,
-        export_quality=export_quality,
-        sharpen_amount=sharpen_amount,
     )
     _validate_upscale_resolution(metadata, upscale_options)
     return vars(upscale_options)
@@ -755,12 +950,16 @@ def _process_json_payload(request: Request, response: StreamingResponse, tool: s
     headers = response.headers
     relative_download_url = headers.get("X-Download-URL")
     relative_source_url = headers.get("X-Source-URL")
+    relative_listing_pack_url = headers.get("X-Listing-Pack-URL")
     absolute_download_url = None
     absolute_source_url = None
+    absolute_listing_pack_url = None
     if relative_download_url:
         absolute_download_url = str(request.base_url).rstrip("/") + relative_download_url
     if relative_source_url:
         absolute_source_url = str(request.base_url).rstrip("/") + relative_source_url
+    if relative_listing_pack_url:
+        absolute_listing_pack_url = str(request.base_url).rstrip("/") + relative_listing_pack_url
     return {
         "job_id": headers.get("X-Job-Id"),
         "filename": _filename_from_disposition(headers.get("content-disposition")),
@@ -768,6 +967,8 @@ def _process_json_payload(request: Request, response: StreamingResponse, tool: s
         "relative_download_url": relative_download_url,
         "source_url": absolute_source_url,
         "relative_source_url": relative_source_url,
+        "listing_pack_url": absolute_listing_pack_url,
+        "relative_listing_pack_url": relative_listing_pack_url,
         "metadata": {
             "tool": tool,
             "output_width": headers.get("X-Output-Width"),
@@ -775,7 +976,8 @@ def _process_json_payload(request: Request, response: StreamingResponse, tool: s
             "output_dpi": headers.get("X-Output-DPI"),
             "engine": headers.get("X-Upscaler-Engine")
             or headers.get("X-Background-Engine")
-            or headers.get("X-Pipeline-Engine"),
+            or headers.get("X-Pipeline-Engine")
+            or headers.get("X-Vector-Engine"),
         },
     }
 
@@ -794,6 +996,8 @@ async def api_process(
     denoise: float = Form(0.55),
     tile: int = Form(512),
     device: str = Form("auto"),
+    upscale_device: str | None = Form(None),
+    background_device: str | None = Form(None),
     output_format: str = Form("png"),
     target_width: int | None = Form(None),
     target_height: int | None = Form(None),
@@ -816,6 +1020,18 @@ async def api_process(
     post_process_mask: bool = Form(True),
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
+    vector_preset: str = Form("logo"),
+    vector_colormode: str | None = Form(None),
+    vector_hierarchical: str | None = Form(None),
+    vector_mode: str | None = Form(None),
+    vector_filter_speckle: int | None = Form(None),
+    vector_color_precision: int | None = Form(None),
+    vector_layer_difference: int | None = Form(None),
+    vector_corner_threshold: int | None = Form(None),
+    vector_length_threshold: float | None = Form(None),
+    vector_max_iterations: int | None = Form(None),
+    vector_splice_threshold: int | None = Form(None),
+    vector_path_precision: int | None = Form(None),
 ):
     _require_api_key(x_api_key, authorization)
     tool = tool.strip().lower()
@@ -823,31 +1039,54 @@ async def api_process(
     if response_mode not in SUPPORTED_RESPONSE_MODES:
         raise HTTPException(status_code=400, detail="response_mode must be image or json.")
 
+    effective_upscale_device = upscale_device or device
+    effective_background_device = background_device or device
+
     if tool == "upscale":
         response = await api_upscale(
             image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
-            device=device, output_format=output_format, target_width=target_width, target_height=target_height,
+            device=effective_upscale_device, output_format=output_format, target_width=target_width, target_height=target_height,
             resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height,
-            canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount
+            canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount,
+            x_api_key=x_api_key, authorization=authorization,
         )
     elif tool == "remove-background":
         response = await api_remove_background(
             image=image, model=model, cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine,
             edge_trim=edge_trim, fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup,
-            background_tolerance=background_tolerance, device=device, post_process_mask=post_process_mask,
+            background_tolerance=background_tolerance, device=effective_background_device, post_process_mask=post_process_mask,
             preserve_interior=preserve_interior, respect_existing_alpha=respect_existing_alpha,
-            output_format=output_format
+            output_format=output_format, x_api_key=x_api_key, authorization=authorization,
+        )
+    elif tool == "vectorize":
+        response = await api_vectorize(
+            image=image,
+            vector_preset=vector_preset,
+            vector_colormode=vector_colormode,
+            vector_hierarchical=vector_hierarchical,
+            vector_mode=vector_mode,
+            vector_filter_speckle=vector_filter_speckle,
+            vector_color_precision=vector_color_precision,
+            vector_layer_difference=vector_layer_difference,
+            vector_corner_threshold=vector_corner_threshold,
+            vector_length_threshold=vector_length_threshold,
+            vector_max_iterations=vector_max_iterations,
+            vector_splice_threshold=vector_splice_threshold,
+            vector_path_precision=vector_path_precision,
+            x_api_key=x_api_key,
+            authorization=authorization,
         )
     elif tool == "remove-background-upscale":
         response = await api_remove_background_upscale(
             image=image, scale=scale, mode=mode, face_enhance=face_enhance, denoise=denoise, tile=tile,
-            upscale_device=device, target_width=target_width, target_height=target_height,
+            upscale_device=effective_upscale_device, target_width=target_width, target_height=target_height,
             resize_method=resize_method, target_fit=target_fit, canvas_width=canvas_width, canvas_height=canvas_height,
             canvas_anchor=canvas_anchor, dpi=dpi, export_quality=export_quality, sharpen_amount=sharpen_amount, model=model,
             cut_mode=cut_mode, alpha_matting=alpha_matting, edge_refine=edge_refine, edge_trim=edge_trim,
             fringe_cleanup=fringe_cleanup, inner_cleanup=inner_cleanup, background_tolerance=background_tolerance,
-            background_device=device, post_process_mask=post_process_mask, preserve_interior=preserve_interior,
-            respect_existing_alpha=respect_existing_alpha, output_format=output_format
+            background_device=effective_background_device, post_process_mask=post_process_mask, preserve_interior=preserve_interior,
+            respect_existing_alpha=respect_existing_alpha, output_format=output_format,
+            x_api_key=x_api_key, authorization=authorization,
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported tool. Must be one of: {', '.join(SUPPORTED_TOOLS)}.")
@@ -856,6 +1095,81 @@ async def api_process(
         return response
 
     return JSONResponse(_process_json_payload(request, response, tool))
+
+
+@app.post("/api/vectorize")
+async def api_vectorize(
+    image: UploadFile = File(...),
+    vector_preset: str = Form("logo"),
+    vector_colormode: str | None = Form(None),
+    vector_hierarchical: str | None = Form(None),
+    vector_mode: str | None = Form(None),
+    vector_filter_speckle: int | None = Form(None),
+    vector_color_precision: int | None = Form(None),
+    vector_layer_difference: int | None = Form(None),
+    vector_corner_threshold: int | None = Form(None),
+    vector_length_threshold: float | None = Form(None),
+    vector_max_iterations: int | None = Form(None),
+    vector_splice_threshold: int | None = Form(None),
+    vector_path_precision: int | None = Form(None),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
+    raw, metadata = await _read_validated_upload(image)
+    try:
+        _validate_vector_resolution(metadata)
+        options = normalize_vector_options(
+            VectorizeOptions(
+                preset=vector_preset,
+                colormode=vector_colormode,
+                hierarchical=vector_hierarchical,
+                mode=vector_mode,
+                filter_speckle=vector_filter_speckle,
+                color_precision=vector_color_precision,
+                layer_difference=vector_layer_difference,
+                corner_threshold=vector_corner_threshold,
+                length_threshold=vector_length_threshold,
+                max_iterations=vector_max_iterations,
+                splice_threshold=vector_splice_threshold,
+                path_precision=vector_path_precision,
+            )
+        )
+        started = time.perf_counter()
+        logger.info("vectorize start filename=%s input=%sx%s options=%s", image.filename, metadata["width"], metadata["height"], options)
+        result = await run_in_threadpool(vectorize_image, raw, options)
+        logger.info("vectorize complete filename=%s output=%sx%s engine=%s elapsed=%.1fs", image.filename, result.width, result.height, result.engine, time.perf_counter() - started)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    stem = _safe_stem(image.filename)
+    filename = f"{stem}-vector.svg"
+    job = save_job_result(
+        tool="vectorize",
+        source_filename=image.filename,
+        output_filename=filename,
+        data=result.data,
+        input_metadata=metadata,
+        output_width=result.width,
+        output_height=result.height,
+        output_format=result.extension,
+        engine=result.engine,
+        settings=vars(result.options),
+        source_data=raw,
+    )
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Vector-Engine": result.engine,
+        "X-Output-Width": str(result.width),
+        "X-Output-Height": str(result.height),
+        "X-Job-Id": str(job["id"]),
+        "X-Download-URL": str(job["download_url"]),
+        "X-Source-URL": str(job.get("source_download_url", "")),
+        "X-Listing-Pack-URL": str(job.get("listing_pack_url", "")),
+    }
+    return StreamingResponse(io.BytesIO(result.data), media_type=result.media_type, headers=headers)
 
 
 @app.post("/api/upscale")
@@ -878,7 +1192,10 @@ async def api_upscale(
     dpi: int | None = Form(None),
     export_quality: int = Form(95),
     sharpen_amount: int = Form(70),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
     raw, metadata = await _read_validated_upload(image)
 
     try:
@@ -950,6 +1267,7 @@ async def api_upscale(
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
         "X-Source-URL": str(job.get("source_download_url", "")),
+        "X-Listing-Pack-URL": str(job.get("listing_pack_url", "")),
     }
 
     return StreamingResponse(
@@ -991,7 +1309,10 @@ async def api_remove_background_upscale(
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
     output_format: str = Form("png"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
     raw, metadata = await _read_validated_upload(image)
 
     try:
@@ -1096,6 +1417,7 @@ async def api_remove_background_upscale(
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
         "X-Source-URL": str(job.get("source_download_url", "")),
+        "X-Listing-Pack-URL": str(job.get("listing_pack_url", "")),
     }
 
     return StreamingResponse(
@@ -1121,7 +1443,10 @@ async def api_remove_background(
     preserve_interior: bool = Form(True),
     respect_existing_alpha: bool = Form(True),
     output_format: str = Form("png"),
+    x_api_key: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> StreamingResponse:
+    _require_api_key(x_api_key, authorization)
     raw, metadata = await _read_validated_upload(image)
 
     try:
@@ -1186,6 +1511,7 @@ async def api_remove_background(
         "X-Job-Id": str(job["id"]),
         "X-Download-URL": str(job["download_url"]),
         "X-Source-URL": str(job.get("source_download_url", "")),
+        "X-Listing-Pack-URL": str(job.get("listing_pack_url", "")),
     }
 
     return StreamingResponse(
@@ -1212,8 +1538,8 @@ async def _read_validated_upload(image: UploadFile) -> tuple[bytes, dict[str, ob
             }
             _validate_input_resolution(metadata)
             probe.verify()
-    except (UnidentifiedImageError, OSError) as exc:
-        raise HTTPException(status_code=400, detail="Unsupported or corrupted image.") from exc
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail="Unsupported, corrupted, or unsafe image.") from exc
     return raw, metadata
 
 
@@ -1228,19 +1554,39 @@ def _validate_input_resolution(metadata: dict[str, object]) -> None:
                 f"{MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}."
             ),
         )
+    if width * height > MAX_INPUT_PIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image contains {width * height:,} pixels. Maximum input area is {MAX_INPUT_PIXELS:,} pixels.",
+        )
+
+
+def _validate_vector_resolution(metadata: dict[str, object]) -> None:
+    width = int(metadata["width"])
+    height = int(metadata["height"])
+    if width * height > MAX_VECTOR_PIXELS:
+        raise ValueError(
+            f"Vectorization input contains {width * height:,} pixels. "
+            f"Maximum vector input area is {MAX_VECTOR_PIXELS:,} pixels."
+        )
 
 
 def _validate_upscale_resolution(metadata: dict[str, object], options: UpscaleOptions) -> None:
     width = int(metadata["width"])
     height = int(metadata["height"])
     content_size, output_size = resolve_upscale_sizes(width, height, options)
-    output_width, output_height = output_size
-    if output_width > MAX_IMAGE_DIMENSION or output_height > MAX_IMAGE_DIMENSION:
-        raise ValueError(
-            f"Requested output would be {output_width} x {output_height}. "
-            f"Maximum output resolution is {MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}. "
-            "Choose a smaller output size or resize the source image first."
-        )
+    for label, (candidate_width, candidate_height) in (("intermediate", content_size), ("output", output_size)):
+        if candidate_width > MAX_IMAGE_DIMENSION or candidate_height > MAX_IMAGE_DIMENSION:
+            raise ValueError(
+                f"Requested {label} would be {candidate_width} x {candidate_height}. "
+                f"Maximum raster resolution is {MAX_IMAGE_DIMENSION} x {MAX_IMAGE_DIMENSION}. "
+                "Choose a smaller output size or resize the source image first."
+            )
+        if candidate_width * candidate_height > MAX_OUTPUT_PIXELS:
+            raise ValueError(
+                f"Requested {label} contains {candidate_width * candidate_height:,} pixels. "
+                f"Maximum raster area is {MAX_OUTPUT_PIXELS:,} pixels."
+            )
     upscale_factor = max(content_size[0] / width, content_size[1] / height)
     if upscale_factor > MAX_UPSCALE_FACTOR:
         raise ValueError(
@@ -1269,6 +1615,10 @@ def _normalize_tool(tool: str) -> str:
         "background-upscale": "remove-background-upscale",
         "remove-bg-upscale": "remove-background-upscale",
         "remove-background-and-upscale": "remove-background-upscale",
+        "vector": "vectorize",
+        "svg": "vectorize",
+        "trace": "vectorize",
+        "image-to-svg": "vectorize",
     }
     normalized = aliases.get(normalized, normalized)
     if normalized not in SUPPORTED_TOOLS:
@@ -1315,60 +1665,11 @@ def _automation_response(
 
 @lru_cache(maxsize=1)
 def _runtime_info() -> dict[str, object]:
-    info: dict[str, object] = {
-        "requested_device": os.getenv("UPSCALER_DEVICE", "auto"),
-        "background_requested_device": os.getenv("REMBG_DEVICE", os.getenv("UPSCALER_DEVICE", "auto")),
-        "available_devices": ["cpu"],
-        "torch": None,
-        "cuda_available": False,
-        "cuda_device": None,
-        "onnxruntime": None,
-        "onnx_providers": [],
-    }
-    try:
-        import torch
-
-        cuda_available = bool(torch.cuda.is_available())
-        info.update(
-            {
-                "torch": torch.__version__,
-                "cuda_available": cuda_available,
-                "cuda_device": torch.cuda.get_device_name(0) if cuda_available else None,
-                "available_devices": ["cpu", "cuda"] if cuda_available else ["cpu"],
-            }
-        )
-    except Exception as exc:
-        info["torch_error"] = str(exc)
-    try:
-        import onnxruntime as ort
-
-        info["onnxruntime"] = ort.__version__
-        info["onnx_providers"] = ort.get_available_providers()
-    except Exception as exc:
-        info["onnxruntime_error"] = str(exc)
-    return info
+    return get_runtime_info()
 
 
 def _runtime_recommendations(runtime: dict[str, object]) -> list[str]:
-    recommendations = [
-        "Leave hardware selectors on Auto unless you are troubleshooting a specific job.",
-        "Use CPU for maximum compatibility, small graphics, and simple logo cutouts.",
-    ]
-    if runtime.get("cuda_available"):
-        recommendations.insert(
-            1,
-            "Use NVIDIA GPU for 4x or 8x upscales, large photos, all-in-one jobs, and batches.",
-        )
-    else:
-        recommendations.insert(
-            1,
-            "No CUDA GPU is visible inside the container, so GPU selections will fall back or error.",
-        )
-
-    providers = runtime.get("onnx_providers") or []
-    if "CUDAExecutionProvider" not in providers:
-        recommendations.append("Background removal is not seeing ONNX CUDA; use CPU or rebuild with GPU dependencies.")
-    return recommendations
+    return runtime_recommendations(runtime)
 
 
 @app.exception_handler(HTTPException)

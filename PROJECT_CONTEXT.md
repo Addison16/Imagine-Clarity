@@ -1,11 +1,11 @@
 # Imagine Clarity Project Context
 
-Last updated: 2026-05-11
+Last updated: 2026-07-10
 
 ## What This Is
 
 Imagine Clarity is a Docker-hosted image utility with a local web UI at port `8794`.
-It upscales images, removes backgrounds, and can run an all-in-one workflow that removes the background first and then upscales the transparent result.
+It upscales images, removes backgrounds, runs an all-in-one cutout/upscale workflow, and traces raster artwork into scalable SVG files with VTracer.
 
 The app is designed to run on CPU by default and use NVIDIA CUDA automatically when available. The UI also exposes hardware selectors so users can choose Auto, CPU, or GPU behavior for upscale and background removal jobs.
 
@@ -23,6 +23,8 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - SSE progress streaming through `/api/events`, with UI polling fallback.
 - Batch processing from the UI by selecting multiple image files.
 - Automation API via `/api/process` with image or JSON response modes and `/api/capabilities` for settings discovery.
+- VTracer SVG vectorization with `logo`, `artwork`, `line-art`, and `photo` presets across direct, queued, and batch paths.
+- Runtime capability discovery that separates PyTorch upscale devices from ONNX background-removal providers.
 - Saved Jobs panel backed by persisted Docker storage.
 - Saved Jobs supports deleting individual results and clearing recent jobs after a UI confirmation prompt.
 - Runtime Diagnostics panel backed by `/api/diagnostics`.
@@ -51,6 +53,8 @@ The app is designed to run on CPU by default and use NVIDIA CUDA automatically w
 - `app/tasks.py`: worker-side queued processing for single-image and batch jobs.
 - `app/worker.py`: RQ worker process entrypoint.
 - `app/upscaler.py`: upscale logic, hardware selection, target sizing, and alpha-aware transparent resizing.
+- `app/devices.py`: normalized runtime device/provider discovery and workflow-specific selection.
+- `app/vectorizer.py`: VTracer presets, validation, SVG conversion, and effective trace settings.
 - `app/static/index.html`: web UI markup.
 - `app/static/app.js`: web UI behavior and form/API wiring.
 - `app/static/styles.css`: web UI styling.
@@ -67,7 +71,7 @@ Expected behavior:
 - Users can leave hardware on Auto for best default behavior.
 - Upscale and background removal have separate hardware selectors in the UI.
 - AMD and Intel GPUs are not automatically accelerated through Docker right now; they fall back to CPU unless a future backend is added for those runtimes.
-- Queued jobs are processed by the separate `clarity-worker` container. The web container only accepts uploads, writes source files to shared Docker storage, enqueues Redis/RQ jobs, and streams Redis status events back to the UI.
+- The published CPU and GPU images are self-contained. A PID 1 supervisor starts loopback-only Redis, the RQ worker, and FastAPI in one container; queued work still runs outside the web process.
 
 ## Current Local State
 
@@ -77,12 +81,7 @@ The development container is named:
 clarity-upscaler
 ```
 
-The Redis and worker containers are:
-
-```powershell
-clarity-redis
-clarity-worker
-```
+Redis and the RQ worker run as child processes inside `clarity-upscaler`; Redis is not exposed to the host.
 
 The local app URL is:
 
@@ -99,14 +98,13 @@ clarity-image-tools:gpu
 Saved outputs are stored inside the container at:
 
 ```text
-/tmp/upscaler/outputs
+/data/storage/outputs
 ```
 
 ## Useful Verification Commands
 
 ```powershell
 docker ps --filter name=clarity-upscaler
-docker ps --filter name=clarity-worker
 Invoke-RestMethod -Uri http://localhost:8794/health | ConvertTo-Json -Depth 5
 Invoke-RestMethod -Uri http://localhost:8794/api/queue/health | ConvertTo-Json -Depth 5
 Get-Content scripts\smoke_test.py | docker exec -i clarity-upscaler python - http://127.0.0.1:8794
@@ -127,8 +125,11 @@ node --check app\static\app.js
 - Added alpha-aware transparent resize plus edge trim, fringe cleanup, and inner cleanup controls for cleaner transparent cutouts.
 - Added optional API-key gate for automation endpoint via `CLARITY_API_KEY` and `X-API-Key` header.
 - Added optional CORS allowlist via `CORS_ALLOW_ORIGINS` and optional job/result TTL cleanup via `JOB_TTL_HOURS`.
-- Replaced in-process single/batch workers with Redis + RQ + a separate `worker` Compose service.
+- Replaced in-process single/batch workers with Redis + RQ, then packaged Redis, the worker, and FastAPI into one supervised public container image.
 - Added SSE progress streaming and `/api/queue/health`.
+- Added independent upscale/background device controls with legacy `device` fallback.
+- Added direct, unified, queued, and batch vectorization with SVG-aware history, quality reports, and ZIP downloads.
+- Added an outcome-first mobile workflow hub and expanded end-to-end smoke coverage.
 
 ## Known Limits And Next Improvements
 

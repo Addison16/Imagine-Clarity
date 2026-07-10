@@ -42,7 +42,7 @@ function Test-ContainerCuda {
 
 function Start-Cpu {
     Write-Host "Starting Clarity Image Tools with CPU support on port $Port."
-    docker compose up --build -d
+    docker compose up --build -d --remove-orphans
 }
 
 function Write-DetectedDisplayAdapters {
@@ -67,7 +67,7 @@ Write-DetectedDisplayAdapters
 
 if ($useGpu) {
     Write-Host "Starting Clarity Image Tools with NVIDIA GPU support on port $Port."
-    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+    docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d --remove-orphans
     if ($LASTEXITCODE -ne 0) {
         if ($ForceGpu) {
             exit $LASTEXITCODE

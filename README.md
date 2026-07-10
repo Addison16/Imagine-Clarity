@@ -1,6 +1,6 @@
-# Clarity Upscaler
+# Imagine Clarity
 
-Docker Compose web app for local image upscaling and background removal.
+Self-contained Docker image-preparation app for local upscaling, background removal, combined cutout/upscale workflows, and SVG vectorization. One container includes the web app, Redis queue, and RQ worker.
 
 ## Quick Start
 
@@ -44,6 +44,18 @@ Suggested public image tags after publishing:
 - `ghcr.io/addison16/imagine-clarity:cpu`: explicit CPU-compatible image.
 - `ghcr.io/addison16/imagine-clarity:gpu`: NVIDIA CUDA image for hosts with Docker GPU support.
 
+Each published tag is an all-in-one image for `linux/amd64`. Run the broadly compatible x86-64 CPU image directly:
+
+```powershell
+docker run -d --name imagine-clarity -p 8794:8794 -v imagine-clarity-data:/data -v imagine-clarity-models:/models ghcr.io/addison16/imagine-clarity:latest
+```
+
+Run the NVIDIA image directly on a configured GPU host:
+
+```powershell
+docker run -d --gpus all --name imagine-clarity -p 8794:8794 -v imagine-clarity-data:/data -v imagine-clarity-models:/models ghcr.io/addison16/imagine-clarity:gpu
+```
+
 For most users pulling a published image, the easiest setup is:
 
 ```powershell
@@ -68,13 +80,16 @@ The default neural path uses Real-ESRGAN because it is designed for practical bl
 - `Conservative`: alpha-aware Lanczos plus mild sharpening when exact geometry, text, transparent PNGs, or logos matter more than generated texture.
 - `Remove Background`: rembg/ISNet, U2Net, BiRefNet-lite, and a safe logo/sticker edge-color cutter for transparent background extraction. Alpha matting is available for hair, fur, and soft edges. Edge trim, fringe cleanup, and inner pocket cleanup help remove thin halos and missed background gaps while "Protect inside detail" keeps enclosed artwork from getting random missing spots inside the foreground.
 - `All-in-One`: removes the background first, then upscales the transparent result to the selected scale or target resolution.
-- `Redis worker queue`: single-image and batch jobs upload first, then run in a separate RQ worker container. Closing or refreshing the browser does not cancel accepted jobs.
+- `Vectorize to SVG`: uses VTracer presets for color artwork, logos, photos, and binary line art, with direct, queued, and batch output support.
+- `Per-workflow hardware`: independent upscale and background-removal selectors populated from the PyTorch and ONNXRuntime providers visible inside Docker.
+- `Embedded Redis worker queue`: single-image and batch jobs upload first, then run in the RQ worker bundled into the same container. Closing or refreshing the browser does not cancel accepted jobs.
 - `Paperless-style progress`: queued jobs store server-side status snapshots with phase, message, percent, elapsed time, worker ID, and queue position. The UI uses SSE live updates and falls back to polling.
 - `Batch processing`: select multiple images and the server runs them in the background one at a time. Closing the browser does not cancel the queued batch.
 - `Batch ZIP downloads`: completed batch outputs can be downloaded together as one ZIP file, with per-image result links still available.
 - `Comparison tools`: results open in the slider comparison view by default, with side-by-side, original-only, result-only, difference preview, fit, 100%, and 200% zoom views available from compact dropdowns.
 - `Prepress controls`: non-AI resize methods, target fit/fill/pad/crop behavior, transparent canvas sizing, DPI metadata, print-size readout, output sharpening, JPEG/WebP quality, and TIFF export for controlled print/web prep.
 - `Saved jobs`: completed outputs are saved in Docker storage and listed in the UI for later download, preview, and before/after comparison when a source preview is available. Users can delete individual saved jobs or clear recent saved jobs after a confirmation prompt.
+- `PrintForge listing packs`: real transparent cutout results can produce a ZIP with transparent PNG, white-background JPEG, WebP, thumbnail, and metadata. Opaque upscale/vector results do not advertise misleading packs.
 - `Runtime diagnostics`: the UI and `/api/diagnostics` show CPU/GPU visibility, ONNX providers, storage usage, and practical hardware recommendations.
 - `Presets`: Smart Auto, Logo/Sticker, Photo, Artwork, Product Cutout, Print-Ready, and Transparent Sticker presets set safer defaults quickly.
 - `Guided workflows`: the Process tab starts with creator goals such as Shirt Design, Sticker/Logo, Product Photo, and Web/Listing Image. Each card applies action, target size, model, cut strength, fit mode, and export defaults.
@@ -89,6 +104,7 @@ Research references:
 - GFPGAN face restoration: https://github.com/TencentARC/GFPGAN
 - SwinIR transformer restoration baseline: https://arxiv.org/abs/2108.10257
 - rembg background removal: https://github.com/danielgatis/rembg
+- VTracer vectorization: https://github.com/visioncortex/vtracer
 
 ## Run From Source
 
@@ -151,13 +167,9 @@ http://localhost:8794
 
 The first neural upscale downloads model weights into the `upscaler-models` Docker volume. Conservative mode runs immediately.
 
-Compose starts three services:
+Compose starts one `clarity-upscaler` container. Its PID 1 supervisor starts private Redis, the RQ worker, and the FastAPI web/API service. Redis binds only to `127.0.0.1` inside the container and is never published to the host. Default worker concurrency is `1` to avoid GPU memory contention.
 
-- `upscaler`: FastAPI web/API service on port `8794`.
-- `worker`: Redis/RQ image-processing worker. Default concurrency is `1` to avoid GPU memory contention.
-- `redis`: durable Redis queue and progress store with append-only persistence.
-
-Outputs are stored in the `upscaler-storage` Docker volume at `/tmp/upscaler/outputs` inside the container. Source previews for new single-image jobs are stored under `/tmp/upscaler/queued`; batch source files are stored under `/tmp/upscaler/batches`. Redis job state is stored in the `redis-data` Docker volume. This keeps downloads, previews, queue status, and completed batch ZIPs available after the browser refreshes or closes.
+Outputs, queued sources, batch sources, and append-only Redis state are stored in the `clarity-data` volume mounted at `/data`. Model downloads are stored in `upscaler-models` at `/models`. This keeps downloads, previews, queue status, and completed batch ZIPs available after the browser refreshes, container restart, or host reboot.
 
 ## Hardware Auto-Detection
 
@@ -169,7 +181,7 @@ This app is packaged with a safe default: CPU mode works without special hardwar
 | NVIDIA GPU | Supported by the GPU Docker image when the host has NVIDIA drivers plus Docker GPU support. The app verifies CUDA inside the container before keeping GPU mode. |
 | AMD GPU | Not accelerated by this Docker image yet. It will run in CPU mode. AMD GPU acceleration would need a separate ROCm build and is mostly practical on supported Linux/ROCm setups. |
 | Intel GPU / Intel Arc / iGPU | Not accelerated by this Docker image yet. It will run in CPU mode. Intel GPU acceleration would need a separate OpenVINO or other provider-specific build. |
-| Apple Silicon GPU | Not accelerated inside this Docker image. CPU mode may work depending on Docker/Python package compatibility. |
+| Apple Silicon / ARM64 | The published images are currently `linux/amd64`; use an x86-64 Docker host or build from source while ARM64 dependency support is evaluated. Apple GPU acceleration is not available inside Docker. |
 
 Why: Docker GPU pass-through is not one universal interface. Docker documents GPU reservations for Compose, Docker Desktop documents NVIDIA GPU support on Windows with the WSL2 backend, and ONNX Runtime exposes hardware acceleration through provider-specific builds such as CUDA, ROCm, DirectML, and OpenVINO.
 
@@ -279,13 +291,14 @@ curl.exe -X POST http://localhost:8794/api/jobs/QUEUE_JOB_ID/reprocess `
   --data "{\"quick_fix\":\"fix-white-halo\"}"
 ```
 
-Valid quick fixes are `fix-white-halo`, `trim-edge-slightly`, `preserve-more-detail`, and `stronger-background-cut`.
+Valid quick fixes are `fix-white-halo`, `trim-edge-slightly`, `preserve-more-detail`, `make-text-sharper`, `try-safer-mode`, and `stronger-background-cut`. Background/edge fixes are rejected for incompatible upscale or vector jobs instead of silently rerunning unchanged settings.
 
 Valid `tool` values for `/api/process`:
 
 - `upscale`
 - `remove-background`
 - `remove-background-upscale`
+- `vectorize`
 
 The older direct endpoints below are still supported.
 
@@ -339,6 +352,20 @@ curl.exe -X POST http://localhost:8794/api/remove-background-upscale `
   -F "output_format=png" `
   --output transparent-upscaled.png
 ```
+
+Vectorize a logo or clean piece of artwork to SVG:
+
+```powershell
+curl.exe -X POST http://localhost:8794/api/vectorize `
+  -F "image=@input.png" `
+  -F "vector_preset=logo" `
+  -F "vector_colormode=color" `
+  -F "vector_hierarchical=stacked" `
+  -F "vector_mode=spline" `
+  --output traced.svg
+```
+
+Available vector presets are `logo`, `artwork`, `line-art`, and `photo`. `line-art` defaults to binary tracing. Vector jobs are also supported by `/api/process`, `/api/jobs/queue`, and `/api/batches`; completed vector batches download as ZIP archives containing SVG files.
 
 List saved jobs:
 
@@ -466,29 +493,36 @@ curl.exe -X POST http://localhost:8794/api/process `
 - `MAX_BATCH_FILES`: maximum files in one batch, default `100`.
 - `MAX_BATCH_TOTAL_MB`: maximum total upload size for one batch, default `512`.
 - `MAX_IMAGE_DIMENSION`: maximum input side and generated output side, default `16384` for a 16K x 16K cap.
+- `MAX_INPUT_PIXELS`: maximum decoded input area, default `64000000` pixels.
+- `MAX_OUTPUT_PIXELS`: maximum intermediate or final raster area, default `64000000` pixels.
+- `MAX_VECTOR_PIXELS`: lower vectorization input cap, default `25000000` pixels.
+- `MAX_LISTING_PACK_PIXELS`: maximum output area eligible for an in-memory listing pack, default `25000000` pixels.
 - `UPSCALER_DEVICE`: `auto`, `cpu`, or `cuda`. The provided image installs CPU PyTorch wheels for broad compatibility.
 - GPU mode uses `Dockerfile.gpu`, CUDA-enabled PyTorch wheels, and `onnxruntime-gpu` so both upscaling and background removal can use the NVIDIA GPU. It requires an NVIDIA driver plus Docker's NVIDIA runtime.
 - `REMBG_DEVICE`: optional override for background removal, defaults to `UPSCALER_DEVICE`. Use `cpu` to force background removal to CPU.
+- `ENABLE_TENSORRT_PROVIDER`: explicit opt-in for TensorRT provider discovery, default `false`; core, plugin, and ONNX parser libraries must all be loadable.
 - `U2NET_HOME`: rembg model cache path, default `/models/rembg` inside the Compose volume.
-- `STORAGE_DIR`: saved output and job history path inside the container, default `/tmp/upscaler`.
+- `STORAGE_DIR`: saved output and job history path inside the container, default `/data/storage`.
+- `REDIS_DATA_DIR`: append-only embedded Redis data path, default `/data/redis`.
 - `HISTORY_LIMIT`: number of saved jobs kept in the JSON history, default `100`.
 - `QUEUE_HISTORY_LIMIT`: number of queued single-image job records kept, default `100`.
-- `REDIS_URL`: Redis connection URL used by the web and worker services, default `redis://redis:6379/0` in Compose.
+- `REDIS_URL`: Redis connection URL used by the embedded web/worker processes, default `redis://127.0.0.1:6379/0`.
 - `RQ_QUEUE_NAME`: Redis/RQ queue name, default `image-jobs`.
-- `WORKER_CONCURRENCY`: number of worker processes in the worker container, default `1`. Keep this at `1` for most GPU setups to avoid out-of-memory failures.
+- `WORKER_CONCURRENCY`: number of RQ worker processes inside the all-in-one container, default `1`. Keep this at `1` for most GPU setups to avoid out-of-memory failures.
 - `JOB_TIMEOUT_SECONDS`: maximum runtime for one queued job, default `7200`.
 - `BATCH_HISTORY_LIMIT`: number of saved batch records kept in the JSON history, default `50`.
 - `JOB_TTL_HOURS`: optional auto-cleanup window for saved jobs/results. `0` disables TTL cleanup (default).
-- `CLARITY_API_KEY`: optional API key for `/api/process`. If set, callers must send `X-API-Key: <value>` or `Authorization: Bearer <value>`.
+- `CLARITY_API_KEY`: optional key for API-only/headless deployments. When set, protected processing, queue, history, result, source, batch, preset, and event endpoints require `X-API-Key: your-key` or `Authorization: Bearer your-key`. The bundled browser UI does not collect or retain this secret, so leave it unset for local UI use or place the app behind an authenticated reverse proxy that injects the header.
 - `CORS_ALLOW_ORIGINS`: comma-separated CORS allowlist. Default is `*` for local/dev convenience.
 
 Per-job processing source:
 
-- The UI includes a `Processing source` dropdown for both Upscale and Remove Background.
-- `Auto select`: use CUDA when the running container can see it, otherwise CPU.
-- `NVIDIA GPU`: require CUDA for that job.
-- `CPU`: force that one job to CPU.
-- API callers can send `device=auto`, `device=cuda`, or `device=cpu` to `/api/upscale` and `/api/remove-background`.
+- The UI includes independent processing-source dropdowns for Upscale and Remove Background. Options come from `/api/capabilities` and reflect providers visible inside the running container.
+- `Auto select`: use the best supported accelerator when visible, otherwise CPU.
+- `NVIDIA CUDA GPU`: require CUDA for a PyTorch upscale or CUDA-enabled background-removal job.
+- `CPU`: force that one stage to CPU.
+- API callers can use `upscale_device` and `background_device` for combined, queued, batch, and unified `/api/process` requests. The older `device` field remains a compatibility fallback.
+- PyTorch upscaling supports CPU, CUDA, and MPS when available. ONNX background removal can additionally expose ROCm, DirectML, OpenVINO, or CoreML when the installed container runtime provides them. TensorRT requires `ENABLE_TENSORRT_PROVIDER=true` plus loadable TensorRT core, plugin, and ONNX parser libraries.
 
 Upscale `mode` values:
 
@@ -525,5 +559,10 @@ Background refinement values:
 ## Verify
 
 ```powershell
+python -m compileall app scripts/smoke_test.py tests
+node --check app/static/app.js
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 python scripts/smoke_test.py http://localhost:8794
 ```
+
+The smoke suite covers health/capabilities, saved results, separate hardware fields, direct and unified APIs, Redis/RQ queue processing, raster and vector batches, SVG ZIP downloads, and preset-only line-art defaults.

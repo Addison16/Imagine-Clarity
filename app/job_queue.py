@@ -191,6 +191,9 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
         public["output"] = job["output"]
     if job.get("engine"):
         public["engine"] = job["engine"]
+    for key in ("parent_queue_job_id", "quick_fix"):
+        if job.get(key):
+            public[key] = job.get(key)
     if job.get("result_job_id"):
         public["result_job_id"] = job["result_job_id"]
         public["download_url"] = job.get("result_download_url")
@@ -205,6 +208,12 @@ def public_job(job: dict[str, Any]) -> dict[str, Any]:
                     "filename": saved.get("filename"),
                     "output": saved.get("output"),
                     "engine": saved.get("engine"),
+                    "quality_report": saved.get("quality_report"),
+                    "listing_pack_url": saved.get("listing_pack_url"),
+                    "display_name": saved.get("display_name"),
+                    "note": saved.get("note"),
+                    "parent_queue_job_id": saved.get("parent_queue_job_id") or public.get("parent_queue_job_id"),
+                    "quick_fix": saved.get("quick_fix") or public.get("quick_fix"),
                 }
             )
     return public
