@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Imagine Clarity | Image Tools</title>
     <link rel="icon" href="/static/brand-mark.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/static/styles.css?v=20260618l" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260710-final" />
   </head>
   <body>
     <main class="page-shell">
@@ -22,6 +22,7 @@
               <span>Transparent PNG</span>
               <span>Print-ready sizing</span>
               <span>Background cleanup</span>
+              <span>Vector SVG</span>
               <span>Recent assets saved</span>
             </div>
           </div>
@@ -44,6 +45,52 @@
           <strong>Start with the outcome</strong>
           <span>Choose what you are making, then the studio handles the safe defaults. Pro controls stay available when you need them.</span>
         </div>
+
+        <section class="intent-hub" aria-labelledby="intent-hub-title">
+          <div class="intent-hub-copy">
+            <span class="eyebrow">Pick a job</span>
+            <h2 id="intent-hub-title">What are you trying to do?</h2>
+            <p>Tap one path and Clarity opens the right tool with safe settings. You can still switch to Pro for manual tuning.</p>
+          </div>
+          <div class="intent-grid">
+            <button class="intent-card" type="button" data-workflow-choice="shirt" aria-pressed="true">
+              <span class="intent-icon" aria-hidden="true">T</span>
+              <span class="intent-title">Make a shirt print</span>
+              <small>Transparent PNG, background cleanup, 4500 x 5400 print canvas.</small>
+              <span class="intent-action">Start shirt workflow</span>
+            </button>
+            <button class="intent-card" type="button" data-workflow-choice="sticker" aria-pressed="false">
+              <span class="intent-icon" aria-hidden="true">S</span>
+              <span class="intent-title">Sticker or logo PNG</span>
+              <small>Protect lettering, clean the edge, keep transparent output.</small>
+              <span class="intent-action">Clean sticker art</span>
+            </button>
+            <button class="intent-card" type="button" data-workflow-choice="web" aria-pressed="false">
+              <span class="intent-icon" aria-hidden="true">↑</span>
+              <span class="intent-title">Upscale or resize</span>
+              <small>Improve quality, resize for websites, listings, or mockups.</small>
+              <span class="intent-action">Open resize tool</span>
+            </button>
+            <button class="intent-card" type="button" data-workflow-choice="vector" aria-pressed="false">
+              <span class="intent-icon" aria-hidden="true">V</span>
+              <span class="intent-title">Vectorize to SVG</span>
+              <small>Trace logos, decals, and simple artwork into scalable paths.</small>
+              <span class="intent-action">Open vector tool</span>
+            </button>
+            <button class="intent-card" type="button" data-workflow-choice="product" aria-pressed="false">
+              <span class="intent-icon" aria-hidden="true">P</span>
+              <span class="intent-title">Product photo cutout</span>
+              <small>Remove the background and make listing-friendly product images.</small>
+              <span class="intent-action">Prep product photo</span>
+            </button>
+            <button class="intent-card intent-card-featured" type="button" data-workflow-choice="printforge" aria-pressed="false">
+              <span class="intent-icon" aria-hidden="true">PF</span>
+              <span class="intent-title">PrintForge shop asset</span>
+              <small>Fast path for reusable 3000 x 3000 shop/mockup assets.</small>
+              <span class="intent-action">Use shop preset</span>
+            </button>
+          </div>
+        </section>
 
         <aside id="workflow-assistant" class="workflow-assistant" aria-live="polite">
           <div class="assistant-status">
@@ -99,41 +146,46 @@
                   <span>Pro</span>
                 </label>
               </div>
-              <span id="experience-note" class="field-note">Beginner mode keeps the first workflow focused on upload, action, size, and export.</span>
+              <span id="experience-note" class="field-note">Beginner = safe guided workflow. Pro = manual controls for sizing, cleanup, DPI, and export.</span>
             </div>
 
-            <div class="field">
+            <div class="field workflow-picker-field">
               <span class="label">What are you making?</span>
               <div id="workflow-cards" class="workflow-card-grid" role="group" aria-label="Workflow type">
                 <button class="workflow-card active" type="button" data-workflow-choice="shirt" aria-pressed="true">
                   <span class="workflow-icon" aria-hidden="true">T</span>
                   <span>Shirt Design</span>
-                  <small>Transparent PNG on a 4500 x 5400 canvas.</small>
+                  <small>Best for DTF / print files: removes background, preserves lettering, upscales to 4500 x 5400, exports transparent PNG.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="sticker" aria-pressed="false">
                   <span class="workflow-icon" aria-hidden="true">S</span>
                   <span>Sticker / Logo</span>
-                  <small>Clean edges, protected lettering, transparent output.</small>
+                  <small>Best for transparent art: protects lettering, smooths edges, exports transparent PNG.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="product" aria-pressed="false">
                   <span class="workflow-icon" aria-hidden="true">P</span>
                   <span>Product Photo</span>
-                  <small>Cut out the item and prep a clean listing image.</small>
+                  <small>Best for physical products: cuts out the item and prepares listing-ready output.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="web" aria-pressed="false">
                   <span class="workflow-icon" aria-hidden="true">W</span>
                   <span>Web / Listing Image</span>
-                  <small>Fast sRGB output with smaller WebP/JPEG options.</small>
+                  <small>Best for website images: keeps files smaller and exports web-ready output.</small>
+                </button>
+                <button class="workflow-card" type="button" data-workflow-choice="vector" aria-pressed="false">
+                  <span class="workflow-icon" aria-hidden="true">V</span>
+                  <span>Vector SVG</span>
+                  <small>Best for logos, decals, and simple artwork: traces clean paths for scalable SVG output.</small>
                 </button>
                 <button class="workflow-card workflow-card-featured" type="button" data-workflow-choice="printforge" aria-pressed="false">
                   <span class="workflow-icon" aria-hidden="true">PF</span>
                   <span>PrintForge Product Prep</span>
-                  <small>Fast product-ready transparent PNGs for shop listings and mockups.</small>
+                  <small>Best for shop assets/mockups: creates 3000 x 3000 transparent PNGs and PrintForge packs.</small>
                 </button>
                 <button class="workflow-card" type="button" data-workflow-choice="custom" aria-pressed="false">
                   <span class="workflow-icon" aria-hidden="true">+</span>
                   <span>Custom</span>
-                  <small>Keep your current settings and tune manually.</small>
+                  <small>Pro/manual controls: keep current settings and tune by hand.</small>
                 </button>
               </div>
               <span id="workflow-note" class="field-note">Start with a goal. Clarity will apply matching action, size, cut, and export settings.</span>
@@ -210,6 +262,11 @@
                   <input type="radio" name="tool" value="remove-background-upscale" />
                   <span class="action-name">Remove Background + Upscale</span>
                   <small>Cut out the subject first, then enlarge the cleaned result.</small>
+                </label>
+                <label class="action-card">
+                  <input type="radio" name="tool" value="vectorize" />
+                  <span class="action-name">Vectorize to SVG</span>
+                  <small>Trace logos and simple art into scalable vector paths.</small>
                 </label>
                 <button id="advanced-workflow-card" class="action-card action-card-button" type="button">
                   <span class="action-name">Advanced Workflow</span>
@@ -538,6 +595,67 @@
               </details>
             </div>
 
+
+            <div class="tool-panel hidden" data-tool-panel="vectorize">
+              <div class="tool-panel-heading">
+                <strong>Vectorization Settings</strong>
+                <span>Convert clean logos, decals, and artwork into scalable SVG paths.</span>
+              </div>
+              <label class="field">
+                <span class="label">Trace preset</span>
+                <select id="vector-preset" name="vector_preset">
+                  <option value="logo" selected>Logo / decal - clean colors</option>
+                  <option value="artwork">Artwork - more color detail</option>
+                  <option value="line-art">Line art - black/white paths</option>
+                  <option value="photo">Photo - simplified posterized trace</option>
+                </select>
+                <span class="field-note">Best results come from flat graphics, high-contrast logos, and upscaled/cleaned art. Photos should usually be simplified first.</span>
+              </label>
+              <details class="advanced">
+                <summary>Vector advanced</summary>
+                <label class="field">
+                  <span class="label">Color mode</span>
+                  <select id="vector-colormode" name="vector_colormode">
+                    <option value="color" selected>Color SVG</option>
+                    <option value="binary">Black/white SVG</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Layering</span>
+                  <select id="vector-hierarchical" name="vector_hierarchical">
+                    <option value="stacked" selected>Stacked layers - better color fidelity</option>
+                    <option value="cutout">Cutout layers - fewer overlaps</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Curve style</span>
+                  <select id="vector-mode" name="vector_mode">
+                    <option value="spline" selected>Smooth curves</option>
+                    <option value="polygon">Polygon corners</option>
+                    <option value="none">No curve fitting</option>
+                  </select>
+                </label>
+                <div class="target-grid">
+                  <label>
+                    <span>Remove speckles</span>
+                    <input id="vector-filter-speckle" name="vector_filter_speckle" type="number" min="0" max="128" value="4" />
+                  </label>
+                  <label>
+                    <span>Color precision</span>
+                    <input id="vector-color-precision" name="vector_color_precision" type="number" min="1" max="8" value="6" />
+                  </label>
+                  <label>
+                    <span>Layer difference</span>
+                    <input id="vector-layer-difference" name="vector_layer_difference" type="number" min="0" max="255" value="16" />
+                  </label>
+                  <label>
+                    <span>Path precision</span>
+                    <input id="vector-path-precision" name="vector_path_precision" type="number" min="0" max="8" value="3" />
+                  </label>
+                </div>
+              </details>
+            </div>
+
             <label class="field">
               <span class="label">File format</span>
               <select id="output-format" name="output_format">
@@ -545,6 +663,7 @@
                 <option value="jpeg">JPEG</option>
                 <option value="webp">WebP</option>
                 <option value="tiff">TIFF</option>
+                <option value="svg">SVG</option>
               </select>
             </label>
 
@@ -647,7 +766,7 @@
             <button id="run" class="primary-button" type="submit" disabled>
               <span id="run-label">Upscale Image</span>
             </button>
-            <p id="status-detail" class="status-detail">Ready for an image.</p>
+            <p id="status-detail" class="status-detail">Ready for an image. Most small jobs take under a minute; large upscales and batches take longer.</p>
           </details>
         </form>
 
@@ -735,41 +854,71 @@
             </div>
             <div class="result-buttons">
               <a id="result-download" class="secondary-button" download>Download Image</a>
+              <a id="listing-pack-download" class="secondary-button hidden" download>Create PrintForge Pack</a>
               <button id="compare-toggle" class="secondary-button" type="button">Show Compare</button>
               <button id="process-another" class="ghost-button" type="button">Process Another</button>
             </div>
           </footer>
+          <section id="result-check" class="result-check hidden" aria-label="Result quality check">
+            <div class="result-review-header">
+              <div>
+                <span class="eyebrow">Result Check</span>
+                <strong id="result-check-verdict">Review the saved output</strong>
+              </div>
+            </div>
+            <div id="result-check-list" class="result-check-list"></div>
+          </section>
+          <section id="result-versions" class="result-versions hidden" aria-label="Result versions">
+            <div class="result-review-header">
+              <div>
+                <span class="eyebrow">Versions</span>
+                <strong>Compare original and quick-fix results</strong>
+              </div>
+            </div>
+            <div id="result-version-list" class="version-list"></div>
+          </section>
           <section id="result-review" class="result-review hidden" aria-label="Result review">
             <div class="result-review-header">
               <div>
                 <span class="eyebrow">Result Review</span>
-                <strong>Check the common trouble spots</strong>
+                <strong>What went wrong?</strong>
               </div>
               <span id="result-review-job" class="mini-badge">Queued job</span>
             </div>
             <div class="review-check-grid">
-              <button type="button" class="review-check" data-review-action="edge">
-                <span>Edge cleanup</span>
-                <small>Inspect halos and leftover background on dark/green preview.</small>
+              <button type="button" class="review-check" data-review-action="looks-good">
+                <span>Looks good</span>
+                <small>Keep this version and use the download or PrintForge pack.</small>
               </button>
-              <button type="button" class="review-check" data-review-action="transparent">
-                <span>Transparent background</span>
-                <small>Switch backgrounds to confirm the alpha channel is clean.</small>
+              <button type="button" class="review-check" data-review-action="background-left">
+                <span>Background left behind</span>
+                <small>Queue a new server job with a stronger cut.</small>
               </button>
-              <button type="button" class="review-check" data-review-action="detail">
-                <span>Lettering / detail</span>
-                <small>Open 100% compare to catch warped letters or lost texture.</small>
+              <button type="button" class="review-check" data-review-action="halo">
+                <span>White outline / halo</span>
+                <small>Queue a new server job to trim and clean edge-colored pixels.</small>
+              </button>
+              <button type="button" class="review-check" data-review-action="rough-edges">
+                <span>Edges too rough</span>
+                <small>Queue a new server job to smooth the cut edge.</small>
+              </button>
+              <button type="button" class="review-check" data-review-action="detail-damage">
+                <span>Details/text got damaged</span>
+                <small>Queue a new server job with safer detail settings.</small>
               </button>
               <button type="button" class="review-check" data-review-action="size">
-                <span>Output size</span>
+                <span>Output size wrong</span>
                 <small>Confirm target pixels, format, and print metadata.</small>
               </button>
             </div>
             <div class="quick-fix-row" aria-label="Quick reprocess actions">
-              <button type="button" class="small-button" data-quick-fix="fix-white-halo">Fix White Halo</button>
-              <button type="button" class="small-button" data-quick-fix="trim-edge-slightly">Trim Edge Slightly</button>
-              <button type="button" class="small-button" data-quick-fix="preserve-more-detail">Preserve More Detail</button>
-              <button type="button" class="small-button" data-quick-fix="stronger-background-cut">Stronger Background Cut</button>
+              <button type="button" class="small-button" data-quick-fix="remove-leftover-background">Remove leftover background</button>
+              <button type="button" class="small-button" data-quick-fix="fix-white-halo">Fix white outline / halo</button>
+              <button type="button" class="small-button" data-quick-fix="make-edges-smoother">Make edges smoother</button>
+              <button type="button" class="small-button" data-quick-fix="preserve-tiny-details">Preserve tiny details</button>
+              <button type="button" class="small-button" data-quick-fix="make-text-sharper">Make text sharper</button>
+              <button type="button" class="small-button" data-quick-fix="stronger-background-cut">Stronger background cut</button>
+              <button type="button" class="small-button" data-quick-fix="try-safer-mode">Try safer mode</button>
             </div>
           </section>
           <div id="compare-controls" class="compare-controls hidden" aria-label="Comparison controls">
@@ -822,6 +971,7 @@
                 <option value="upscale">Upscale</option>
                 <option value="remove-background">Remove Background</option>
                 <option value="remove-background-upscale">Remove Background + Upscale</option>
+                <option value="vectorize">Vector SVG</option>
                 <option value="batch">Batch only</option>
               </select>
             </label>
@@ -864,11 +1014,11 @@
       </div>
       <footer class="app-footer">
         <span>Imagine Clarity</span>
-        <span>Build 2026.06.18a</span>
+        <span>Build 2026.07.10</span>
         <span>Drag anywhere or paste an image with Ctrl+V.</span>
       </footer>
     </main>
 
-    <script src="/static/app.js?v=20260618m"></script>
+    <script src="/static/app.js?v=20260710-final"></script>
   </body>
 </html>

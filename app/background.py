@@ -9,6 +9,8 @@ from typing import Any
 
 from PIL import Image
 
+from app.devices import normalize_device, select_onnx_providers
+
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
 REMBG_MODEL_DIR = MODEL_DIR / "rembg"
 os.environ.setdefault("U2NET_HOME", str(REMBG_MODEL_DIR))
@@ -64,7 +66,7 @@ class BackgroundResult:
 
 
 def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResult:
-    options = _normalize_options(options)
+    options = normalize_background_options(options)
     source_img = Image.open(io.BytesIO(raw)).convert("RGBA")
     has_fake_checkerboard = _detect_fake_checkerboard_background(source_img) is not None
 
@@ -110,18 +112,24 @@ def remove_background(raw: bytes, options: BackgroundOptions) -> BackgroundResul
 
     try:
         from rembg import new_session, remove
-        providers = _select_onnx_providers(options.device)
     except Exception as exc:
         raise RuntimeError("The background-removal dependencies are not available. Rebuild the Docker image.") from exc
+    try:
+        providers = _select_onnx_providers(options.device)
+    except Exception as exc:
+        raise RuntimeError(f"Background-removal provider selection failed: {exc}") from exc
 
     model_name = _resolve_background_model_name(options.model, has_fake_checkerboard)
     provider_key = ",".join(providers)
-    with _cache_lock:
-        session = _session_cache.get(f"{model_name}:{provider_key}")
-        if session is None:
-            REMBG_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-            session = new_session(model_name, providers=providers)
-            _session_cache[f"{model_name}:{provider_key}"] = session
+    try:
+        with _cache_lock:
+            session = _session_cache.get(f"{model_name}:{provider_key}")
+            if session is None:
+                REMBG_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+                session = new_session(model_name, providers=providers)
+                _session_cache[f"{model_name}:{provider_key}"] = session
+    except Exception as exc:
+        raise RuntimeError(f"Background-removal provider initialization failed: {exc}") from exc
 
     try:
         foreground_threshold, background_threshold = BACKGROUND_CUT_MODES[options.cut_mode]
@@ -167,7 +175,7 @@ def _resolve_background_model_name(model: str, has_fake_checkerboard: bool) -> s
     return BACKGROUND_MODELS[model]
 
 
-def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
+def normalize_background_options(options: BackgroundOptions) -> BackgroundOptions:
     model = options.model.lower().strip()
     if model not in BACKGROUND_MODELS:
         allowed = ", ".join(sorted(BACKGROUND_MODELS))
@@ -197,7 +205,7 @@ def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
         fringe_cleanup=fringe_cleanup,
         inner_cleanup=inner_cleanup,
         background_tolerance=background_tolerance,
-        device=_normalize_device(options.device),
+        device=normalize_device(options.device, env_var="REMBG_DEVICE", fallback_env_var="UPSCALER_DEVICE"),
         post_process_mask=bool(options.post_process_mask),
         preserve_interior=bool(options.preserve_interior),
         respect_existing_alpha=bool(options.respect_existing_alpha),
@@ -206,14 +214,7 @@ def _normalize_options(options: BackgroundOptions) -> BackgroundOptions:
 
 
 def _normalize_device(requested: str) -> str:
-    device = (requested or "auto").lower().strip()
-    if device == "auto":
-        device = os.getenv("REMBG_DEVICE", os.getenv("UPSCALER_DEVICE", "auto")).lower().strip()
-    if device == "gpu":
-        device = "cuda"
-    if device in {"auto", "cpu"} or device.startswith("cuda"):
-        return device
-    raise ValueError("Background device must be auto, cpu, or cuda.")
+    return normalize_device(requested, env_var="REMBG_DEVICE", fallback_env_var="UPSCALER_DEVICE")
 
 
 def _has_existing_cutout(img: Image.Image) -> bool:
@@ -563,27 +564,4 @@ def _encode(img: Image.Image, output_format: str) -> tuple[bytes, str, str]:
 
 
 def _select_onnx_providers(requested: str) -> list[str]:
-    if requested == "cpu":
-        return ["CPUExecutionProvider"]
-
-    torch_cuda_available = False
-    try:
-        import torch
-
-        torch_cuda_available = bool(torch.cuda.is_available())
-    except Exception:
-        torch_cuda_available = False
-
-    import onnxruntime as ort
-
-    available = ort.get_available_providers()
-    if requested.startswith("cuda"):
-        if not torch_cuda_available or "CUDAExecutionProvider" not in available:
-            raise RuntimeError(
-                "CUDA was selected for this background-removal job, but CUDA is not available in this container."
-            )
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-
-    if torch_cuda_available and "CUDAExecutionProvider" in available:
-        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
-    return ["CPUExecutionProvider"]
+    return select_onnx_providers(requested)

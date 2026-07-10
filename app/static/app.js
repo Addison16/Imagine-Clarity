@@ -63,9 +63,23 @@ const bgToleranceValue = document.querySelector("#bg-tolerance-value");
 const innerCleanup = document.querySelector("#inner-cleanup");
 const innerCleanupValue = document.querySelector("#inner-cleanup-value");
 const backgroundDevice = document.querySelector("#background-device");
+const vectorPreset = document.querySelector("#vector-preset");
+const vectorColormode = document.querySelector("#vector-colormode");
+const vectorHierarchical = document.querySelector("#vector-hierarchical");
+const vectorMode = document.querySelector("#vector-mode");
+const vectorFilterSpeckle = document.querySelector("#vector-filter-speckle");
+const vectorColorPrecision = document.querySelector("#vector-color-precision");
+const vectorLayerDifference = document.querySelector("#vector-layer-difference");
+const vectorPathPrecision = document.querySelector("#vector-path-precision");
 const resultActions = document.querySelector("#result-actions");
 const resultDownload = document.querySelector("#result-download");
+const listingPackDownload = document.querySelector("#listing-pack-download");
 const resultSummary = document.querySelector("#result-summary");
+const resultCheck = document.querySelector("#result-check");
+const resultCheckVerdict = document.querySelector("#result-check-verdict");
+const resultCheckList = document.querySelector("#result-check-list");
+const resultVersions = document.querySelector("#result-versions");
+const resultVersionList = document.querySelector("#result-version-list");
 const resultReview = document.querySelector("#result-review");
 const resultReviewJob = document.querySelector("#result-review-job");
 const reviewCheckButtons = document.querySelectorAll("[data-review-action]");
@@ -149,6 +163,7 @@ let userPresetIds = new Set();
 let historyJobsCache = [];
 let historyBatchesCache = [];
 let activeEventSource = null;
+let resultVersionStore = [];
 
 const formatOptions = Array.from(outputFormat.options).map((option) => ({
   value: option.value,
@@ -462,6 +477,38 @@ const workflowPresets = {
     respectAlpha: true,
     format: "webp",
   },
+  vector: {
+    presetKey: "artwork",
+    workflowNote: "Vector SVG traces logos, decals, and clean artwork into scalable paths.",
+    note: "Vector SVG uses VTracer for accurate color path tracing. Best after cleanup/upscale when the source is rough.",
+    tool: "vectorize",
+    mode: "conservative",
+    model: "logo",
+    cut: "preserve",
+    scale: "2",
+    sizing: "scale",
+    targetPreset: "",
+    targetWidth: "",
+    targetHeight: "",
+    targetFit: "contain",
+    resizeMethod: "preserve",
+    sharpenAmount: "50",
+    dpi: "300",
+    exportQuality: "95",
+    denoise: "0.25",
+    edgeTrim: "0",
+    fringeCleanup: "0",
+    innerCleanup: "0",
+    alphaMatting: false,
+    postProcess: false,
+    preserveInterior: true,
+    respectAlpha: true,
+    format: "svg",
+    vectorPreset: "logo",
+    vectorColormode: "color",
+    vectorHierarchical: "stacked",
+    vectorMode: "spline",
+  },
   printforge: {
     presetKey: "product",
     workflowNote: "PrintForge Product Prep cuts out product art, keeps detail protected, and exports clean shop-ready PNGs.",
@@ -496,6 +543,13 @@ const workflowPresets = {
   },
 };
 
+const vectorPresetDefaults = {
+  logo: { colormode: "color", hierarchical: "stacked", mode: "spline", filterSpeckle: "4", colorPrecision: "6", layerDifference: "16", pathPrecision: "3" },
+  artwork: { colormode: "color", hierarchical: "stacked", mode: "spline", filterSpeckle: "6", colorPrecision: "7", layerDifference: "12", pathPrecision: "4" },
+  "line-art": { colormode: "binary", hierarchical: "stacked", mode: "spline", filterSpeckle: "3", colorPrecision: "6", layerDifference: "16", pathPrecision: "3" },
+  photo: { colormode: "color", hierarchical: "stacked", mode: "spline", filterSpeckle: "8", colorPrecision: "5", layerDifference: "24", pathPrecision: "3" },
+};
+
 function selectedExperienceMode() {
   return document.querySelector('input[name="experience_mode"]:checked')?.value || "beginner";
 }
@@ -511,8 +565,8 @@ function syncExperienceMode() {
   document.body.classList.toggle("pro-mode", isPro);
   if (experienceNote) {
     experienceNote.textContent = isPro
-      ? "Pro mode unlocks processing source, edge cleanup, canvas, DPI, and export tuning."
-      : "Beginner mode keeps the first workflow focused on upload, action, size, and export.";
+      ? "Pro = manual controls for sizing, cleanup, DPI, hardware, and export tuning."
+      : "Beginner = safe guided workflow with clear defaults for upload, action, size, and export.";
   }
   if (!isPro) closeInfoTips();
 }
@@ -537,6 +591,20 @@ function syncWorkflowCards() {
 function syncUserPresetActions() {
   const selected = presetSelect?.value || "";
   deletePresetButton?.classList.toggle("hidden", !userPresetIds.has(selected));
+}
+
+function applyVectorPresetDefaults(force = true) {
+  const defaults = vectorPresetDefaults[vectorPreset?.value || "logo"] || vectorPresetDefaults.logo;
+  const assign = (control, value) => {
+    if (control && (force || !control.value)) control.value = value;
+  };
+  assign(vectorColormode, defaults.colormode);
+  assign(vectorHierarchical, defaults.hierarchical);
+  assign(vectorMode, defaults.mode);
+  assign(vectorFilterSpeckle, defaults.filterSpeckle);
+  assign(vectorColorPrecision, defaults.colorPrecision);
+  assign(vectorLayerDifference, defaults.layerDifference);
+  assign(vectorPathPrecision, defaults.pathPrecision);
 }
 
 function applyWorkflow(key, fromUser = false) {
@@ -574,6 +642,20 @@ function applyPresetValues(preset, key = "", fromUser = false) {
   fringeCleanup.value = merged.fringeCleanup;
   innerCleanup.value = merged.innerCleanup;
   outputFormat.value = merged.format;
+  if (vectorPreset) vectorPreset.value = merged.vectorPreset || "logo";
+  if (merged.vectorColormode || merged.vectorHierarchical || merged.vectorMode || merged.vectorFilterSpeckle || merged.vectorColorPrecision || merged.vectorLayerDifference || merged.vectorPathPrecision) {
+    if (vectorColormode) vectorColormode.value = merged.vectorColormode || "color";
+    if (vectorHierarchical) vectorHierarchical.value = merged.vectorHierarchical || "stacked";
+    if (vectorMode) vectorMode.value = merged.vectorMode || "spline";
+    if (vectorFilterSpeckle) vectorFilterSpeckle.value = merged.vectorFilterSpeckle || "4";
+    if (vectorColorPrecision) vectorColorPrecision.value = merged.vectorColorPrecision || "6";
+    if (vectorLayerDifference) vectorLayerDifference.value = merged.vectorLayerDifference || "16";
+    if (vectorPathPrecision) vectorPathPrecision.value = merged.vectorPathPrecision || "3";
+  } else {
+    applyVectorPresetDefaults(true);
+  }
+  if (upscaleDevice && merged.upscaleDevice) upscaleDevice.value = merged.upscaleDevice;
+  if (backgroundDevice && merged.backgroundDevice) backgroundDevice.value = merged.backgroundDevice;
   resizeMethodSelect.value = merged.resizeMethod || "lanczos";
   targetPresetSelect.value = merged.targetPreset || "";
   targetWidthInput.value = merged.targetWidth || "";
@@ -621,6 +703,7 @@ function detectImageIntent(file, size) {
   if (looksLikeProduct) return { type: "product photo", workflow: "product", tool: "remove-background-upscale", output: "Product listing 1600 x 1600", format: "PNG" };
   if (name.includes("printforge") || name.includes("shop") || name.includes("store")) return { type: "PrintForge product asset", workflow: "printforge", tool: "remove-background-upscale", output: "Shop PNG 3000 x 3000", format: "PNG" };
   if (looksLikeWeb) return { type: "web or listing image", workflow: "web", tool: "upscale", output: "Web listing 1600 x 1600", format: "WebP" };
+  if (name.includes("vector") || name.includes("svg") || name.includes("trace")) return { type: "vector-ready logo or decal", workflow: "vector", tool: "vectorize", output: "Scalable SVG", format: "SVG" };
   if (looksLikeGraphic || squareish) return { type: "logo, sticker, or shirt graphic", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
   return { type: "photo or artwork", workflow: "shirt", tool: "remove-background-upscale", output: "Shirt PNG 4500 x 5400", format: "PNG" };
 }
@@ -648,6 +731,29 @@ function setStatus(message, state = "ready", detail = "") {
 function setRuntime(message, state = "neutral") {
   runtimeChip.textContent = message;
   runtimeChip.className = `runtime-badge ${state}`.trim();
+}
+
+function populateDeviceSelects(runtime = {}) {
+  const options = Array.isArray(runtime.processing_devices) && runtime.processing_devices.length
+    ? runtime.processing_devices
+    : [{ value: "auto", label: "Auto select" }, { value: "cpu", label: "CPU" }, ...(runtime.cuda_available ? [{ value: "cuda", label: runtime.cuda_device || "NVIDIA CUDA GPU" }] : [])];
+
+  const fill = (select, supportKey) => {
+    if (!select) return;
+    const previous = select.value || "auto";
+    select.replaceChildren();
+    options.forEach((option) => {
+      const el = document.createElement("option");
+      el.value = option.value;
+      el.textContent = option.value === "cuda" && runtime.cuda_device ? runtime.cuda_device : option.label;
+      el.disabled = option[supportKey] === false;
+      select.appendChild(el);
+    });
+    select.value = Array.from(select.options).some((option) => option.value === previous && !option.disabled) ? previous : "auto";
+  };
+
+  fill(upscaleDevice, "upscale_supported");
+  fill(backgroundDevice, "background_supported");
 }
 
 function setActiveView(view) {
@@ -743,9 +849,16 @@ function revoke(url) {
   if (url && url.startsWith("blob:")) URL.revokeObjectURL(url);
 }
 
-function absoluteUrl(url) {
+function absoluteUrl(url, { allowBlob = true } = {}) {
   if (!url) return "";
-  return new URL(url, window.location.origin).href;
+  try {
+    const resolved = new URL(url, window.location.origin);
+    const sameOriginHttp = ["http:", "https:"].includes(resolved.protocol) && resolved.origin === window.location.origin;
+    const localBlob = allowBlob && resolved.protocol === "blob:" && resolved.origin === window.location.origin;
+    return sameOriginHttp || localBlob ? resolved.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function delay(ms) {
@@ -1085,8 +1198,9 @@ function validateResolutionForCurrentSettings(validDetail = null) {
 }
 
 function selectedWorkflowLabel() {
-  const active = document.querySelector(`[data-workflow-choice="${activeWorkflow}"] span:not(.workflow-icon)`);
-  return active?.textContent?.trim() || "Current workflow";
+  const activeIntent = document.querySelector(`.intent-card[data-workflow-choice="${activeWorkflow}"] .intent-title`);
+  const activeSidebar = document.querySelector(`.workflow-card[data-workflow-choice="${activeWorkflow}"] > span:not(.workflow-icon)`);
+  return activeIntent?.textContent?.trim() || activeSidebar?.textContent?.trim() || "Current workflow";
 }
 
 function hasResultReady() {
@@ -1179,15 +1293,14 @@ async function loadRuntime() {
     document.querySelector("#drop-note").textContent =
       `PNG, JPG, WEBP, or TIFF supported. Max ${resolutionLimitLabel()} per side. Batches up to ${maxBatchFiles} files or ${maxBatchTotalMb} MB.`;
     const runtime = health.runtime || {};
+    populateDeviceSelects(runtime);
+    const devices = (runtime.processing_devices || []).filter((device) => device.value !== "auto").map((device) => device.label || device.value);
     if (runtime.cuda_available) {
       setRuntime(`GPU: ${runtime.cuda_device || "CUDA"}`, "good");
+    } else if (devices.length > 1) {
+      setRuntime(`Runtime: ${devices.join(", ")}`, "good");
     } else {
       setRuntime("CPU runtime", "warn");
-      document.querySelectorAll(".device-select option[value='cuda']").forEach((option) => {
-        option.disabled = true;
-      });
-      if (upscaleDevice.value === "cuda") upscaleDevice.value = "auto";
-      if (backgroundDevice.value === "cuda") backgroundDevice.value = "auto";
     }
   } catch {
     setRuntime("Runtime unknown", "warn");
@@ -1236,6 +1349,7 @@ async function setFile(file) {
   selectedFile = file;
   if (!selectedFiles.length) selectedFiles = [file];
   selectedImageSize = null;
+  resetResultVersions();
   revoke(beforeUrl);
   revoke(afterUrl);
   beforeUrl = URL.createObjectURL(file);
@@ -1288,6 +1402,10 @@ function usesBackgroundRemoval() {
   return selectedTool() === "remove-background" || selectedTool() === "remove-background-upscale";
 }
 
+function usesVectorize() {
+  return selectedTool() === "vectorize";
+}
+
 function selectedCutMode() {
   return document.querySelector('input[name="cut_mode"]:checked')?.value || "balanced";
 }
@@ -1296,18 +1414,21 @@ const actionLabels = {
   upscale: "Upscale Image",
   "remove-background": "Remove Background",
   "remove-background-upscale": "Remove Background + Upscale",
+  vectorize: "Vectorize to SVG",
 };
 
 const actionNotes = {
   upscale: "Upscale enlarges the image and defaults to a padded 4500 x 5400 shirt canvas.",
   "remove-background": "Remove Background cuts out the subject and returns a transparent PNG or WebP.",
   "remove-background-upscale": "Remove Background + Upscale cuts out the subject first, then targets a padded 4500 x 5400 shirt canvas.",
+  vectorize: "Vectorize traces clean logos, decals, and artwork into scalable SVG paths.",
 };
 
 const toolLabels = {
   upscale: "Upscale",
   "remove-background": "Remove Background",
   "remove-background-upscale": "Remove Background + Upscale",
+  vectorize: "Vectorize",
 };
 
 function actionText() {
@@ -1369,7 +1490,7 @@ function syncToolUi() {
   upscaleOnlyFields.forEach((field) => field.classList.toggle("hidden", !usesUpscale()));
   const previousFormat = outputFormat.value || "png";
   outputFormat.replaceChildren();
-  const allowedFormats = usesBackgroundRemoval() ? ["png", "webp"] : ["png", "jpeg", "webp", "tiff"];
+  const allowedFormats = usesVectorize() ? ["svg"] : usesBackgroundRemoval() ? ["png", "webp"] : ["png", "jpeg", "webp", "tiff"];
   formatOptions
     .filter((option) => allowedFormats.includes(option.value))
     .forEach((option) => {
@@ -1378,7 +1499,7 @@ function syncToolUi() {
       el.textContent = option.text;
       outputFormat.appendChild(el);
     });
-  outputFormat.value = allowedFormats.includes(previousFormat) ? previousFormat : "png";
+  outputFormat.value = allowedFormats.includes(previousFormat) ? previousFormat : allowedFormats[0];
   exportQualityField.classList.toggle("hidden", !["jpeg", "webp"].includes(outputFormat.value));
 
   syncRunLabel();
@@ -1395,6 +1516,113 @@ function syncToolUi() {
   updatePrintSizeNote();
 }
 
+
+function setListingPackDownload(url = "") {
+  const resolved = absoluteUrl(url);
+  if (!listingPackDownload) return;
+  if (resolved) {
+    listingPackDownload.href = resolved;
+    listingPackDownload.download = "";
+    listingPackDownload.classList.remove("hidden");
+  } else {
+    listingPackDownload.removeAttribute("href");
+    listingPackDownload.classList.add("hidden");
+  }
+}
+
+function renderQualityReport(report) {
+  if (!resultCheck || !resultCheckList) return;
+  resultCheckList.replaceChildren();
+  if (!report || !Array.isArray(report.checks)) {
+    resultCheck.classList.add("hidden");
+    return;
+  }
+  resultCheckVerdict.textContent = report.verdict || "Review the saved output.";
+  report.checks.forEach((check) => {
+    const row = document.createElement("div");
+    row.className = `result-check-row ${check.status || "info"}`;
+    const title = document.createElement("strong");
+    title.textContent = check.label || "Check";
+    const copy = document.createElement("span");
+    copy.textContent = check.message || "Review this item.";
+    row.append(title, copy);
+    resultCheckList.append(row);
+  });
+  resultCheck.classList.remove("hidden");
+}
+
+function quickFixLabel(value = "") {
+  return {
+    "remove-leftover-background": "Remove leftover background",
+    "fix-white-halo": "Fix white outline / halo",
+    "make-edges-smoother": "Make edges smoother",
+    "preserve-tiny-details": "Preserve tiny details",
+    "make-text-sharper": "Make text sharper",
+    "stronger-background-cut": "Stronger background cut",
+    "try-safer-mode": "Safer mode",
+    "preserve-more-detail": "Preserve tiny details",
+    "trim-edge-slightly": "Make edges smoother",
+  }[value] || value || "Original result";
+}
+
+function resetResultVersions() {
+  resultVersionStore = [];
+  resultVersionList?.replaceChildren();
+  resultVersions?.classList.add("hidden");
+}
+
+function addResultVersion(job) {
+  if (!job?.download_url) return;
+  const key = job.result_job_id || job.id || job.download_url;
+  const version = {
+    key,
+    label: job.quick_fix ? quickFixLabel(job.quick_fix) : resultVersionStore.length ? "Reprocessed result" : "Original result",
+    job,
+    sourceUrl: job.source_download_url || job.source_url,
+    resultUrl: job.download_url,
+    filename: job.filename || "result.png",
+    summary: jobSummary(job),
+    listingPackUrl: job.listing_pack_url,
+    qualityReport: job.quality_report,
+  };
+  const existing = resultVersionStore.findIndex((item) => item.key === key);
+  if (existing >= 0) resultVersionStore[existing] = version;
+  else resultVersionStore.push(version);
+  renderResultVersions(key);
+}
+
+function renderResultVersions(activeKey = "") {
+  if (!resultVersions || !resultVersionList) return;
+  resultVersionList.replaceChildren();
+  if (resultVersionStore.length < 2) {
+    resultVersions.classList.add("hidden");
+    return;
+  }
+  resultVersionStore.forEach((version, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `version-pill ${version.key === activeKey ? "active" : ""}`.trim();
+    button.textContent = `${index + 1}. ${version.label}`;
+    button.addEventListener("click", () => {
+      openStoredPreview({
+        sourceUrl: version.sourceUrl,
+        resultUrl: version.resultUrl,
+        downloadUrl: version.resultUrl,
+        filename: version.filename,
+        summary: version.summary,
+        listingPackUrl: version.listingPackUrl,
+        qualityReport: version.qualityReport,
+        job: version.job,
+        compare: true,
+        preserveVersions: true,
+      });
+      renderResultVersions(version.key);
+    });
+    resultVersionList.append(button);
+  });
+  resultVersions.classList.remove("hidden");
+}
+
 function hideResultReview() {
   resultReview?.classList.add("hidden");
   currentResultJob = null;
@@ -1402,13 +1630,30 @@ function hideResultReview() {
 
 function showResultReview(job) {
   currentResultJob = job || null;
-  const jobId = job?.queue_job_id || job?.id || currentQueueJobId;
-  if (jobId) currentQueueJobId = jobId;
-  resultReviewJob.textContent = jobId ? `Job ${String(jobId).slice(0, 8)}` : "Server job";
-  const hasBackground = job?.tool === "remove-background" || job?.tool === "remove-background-upscale";
+  const queueJobId = job ? job.queue_job_id : currentQueueJobId;
+  const displayJobId = queueJobId || job?.id;
+  currentQueueJobId = queueJobId || null;
+  resultReviewJob.textContent = displayJobId ? `Job ${String(displayJobId).slice(0, 8)}` : "Server job";
+  const tool = job?.tool || "";
+  const hasBackground = tool === "remove-background" || tool === "remove-background-upscale";
+  const canReprocess = Boolean(queueJobId) && tool !== "vectorize";
+  const backgroundActions = new Set(["background-left", "halo", "rough-edges"]);
+  reviewCheckButtons.forEach((button) => {
+    const action = button.dataset.reviewAction || "";
+    const needsBackground = backgroundActions.has(action);
+    const queuesJob = !["looks-good", "size"].includes(action);
+    button.disabled = queuesJob && (!canReprocess || (needsBackground && !hasBackground));
+    if (button.disabled) {
+      button.title = needsBackground ? "This check requires a queued background-removal result." : "This result cannot be reprocessed from saved history.";
+    } else if (queuesJob) {
+      button.title = "Queues a new server job using the original source.";
+    } else {
+      button.removeAttribute("title");
+    }
+  });
   quickFixButtons.forEach((button) => {
-    button.disabled = !hasBackground;
-    button.title = hasBackground ? "Reprocess the original source with adjusted background settings." : "Quick fixes are for background-removal jobs.";
+    button.disabled = !hasBackground || !queueJobId;
+    button.title = hasBackground && queueJobId ? "Queues a new server job with adjusted background settings." : "Quick fixes require a queued background-removal result.";
   });
   resultReview?.classList.remove("hidden");
 }
@@ -1422,6 +1667,9 @@ function clearResultOnly() {
   afterMeta.textContent = "No result yet";
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
+  setListingPackDownload("");
+  renderQualityReport(null);
+  resetResultVersions();
   hideResultReview();
 }
 
@@ -1447,6 +1695,9 @@ function clearWorkspace() {
   inputChip.classList.add("hidden");
   engineChip.classList.add("hidden");
   resultActions.classList.add("hidden");
+  setListingPackDownload("");
+  renderQualityReport(null);
+  resetResultVersions();
   hideResultReview();
   batchResults.classList.add("hidden");
   batchResults.replaceChildren();
@@ -1677,12 +1928,13 @@ function setPreviewBackground(value = "checker") {
   });
 }
 
-function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summary, compare = false }) {
+function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summary, compare = false, listingPackUrl = "", qualityReport = null, job = null, preserveVersions = false }) {
   const resolvedResult = absoluteUrl(resultUrl || downloadUrl);
   const resolvedSource = absoluteUrl(sourceUrl);
   if (!resolvedResult) return;
   setActiveView("workspace");
   hideResultReview();
+  if (!preserveVersions) resetResultVersions();
 
   revoke(beforeUrl);
   revoke(afterUrl);
@@ -1707,11 +1959,14 @@ function openStoredPreview({ sourceUrl, resultUrl, downloadUrl, filename, summar
   resultDownload.href = afterUrl;
   resultDownload.download = filename || "result.png";
   resultDownload.textContent = "Download Image";
+  setListingPackDownload(listingPackUrl);
+  renderQualityReport(qualityReport);
+  if (job) showResultReview(job);
   resultActions.classList.remove("hidden");
   engineChip.classList.add("hidden");
   differenceKey = "";
   resetCompareDefaults();
-  if (beforeUrl) {
+  if (beforeUrl && compare) {
     openCompare({ mode: "slider" });
   } else {
     closeCompare();
@@ -1750,18 +2005,29 @@ function queuedJobToResult(job) {
 function showQueuedJobResult(job) {
   if (!job?.download_url) throw new Error("Queued job finished without a result URL.");
   currentQueueJobId = job.queue_job_id || job.id || currentQueueJobId;
+  const preserveVersions = Boolean(
+    job.parent_queue_job_id
+    && resultVersionStore.some((version) => (version.job?.queue_job_id || version.job?.id) === job.parent_queue_job_id),
+  );
   openStoredPreview({
     sourceUrl: job.source_download_url || job.source_url,
     resultUrl: job.download_url,
     filename: job.filename || "result.png",
     summary: jobSummary(job),
+    listingPackUrl: job.listing_pack_url,
+    qualityReport: job.quality_report,
+    job,
     compare: true,
+    preserveVersions,
   });
   if (job.engine) {
     engineChip.textContent = job.engine;
     engineChip.className = `mini-badge ${String(job.engine).includes("CUDA") ? "good" : ""}`.trim();
     engineChip.classList.remove("hidden");
   }
+  setListingPackDownload(job.listing_pack_url);
+  renderQualityReport(job.quality_report);
+  addResultVersion(job);
   showResultReview(job);
   return queuedJobToResult(job);
 }
@@ -1785,28 +2051,30 @@ function batchToResults(batch) {
 }
 
 function makePreviewThumbs(sourceUrl, resultUrl, label) {
+  const safeSourceUrl = absoluteUrl(sourceUrl, { allowBlob: false });
+  const safeResultUrl = absoluteUrl(resultUrl, { allowBlob: false });
   const thumbs = document.createElement("button");
   thumbs.className = "preview-thumbs";
-  if (!sourceUrl) thumbs.classList.add("single");
+  if (!safeSourceUrl) thumbs.classList.add("single");
   thumbs.type = "button";
   thumbs.title = "Preview before and after";
   thumbs.addEventListener("click", () => openStoredPreview({
-    sourceUrl,
-    resultUrl,
+    sourceUrl: safeSourceUrl,
+    resultUrl: safeResultUrl,
     filename: label,
     summary: label,
-    compare: Boolean(sourceUrl),
+    compare: Boolean(safeSourceUrl),
   }));
 
-  if (sourceUrl) {
+  if (safeSourceUrl) {
     const before = document.createElement("img");
-    before.src = sourceUrl;
+    before.src = safeSourceUrl;
     before.alt = "Original thumbnail";
     thumbs.append(before);
   }
 
   const after = document.createElement("img");
-  after.src = resultUrl;
+  after.src = safeResultUrl;
   after.alt = "Result thumbnail";
   thumbs.append(after);
   return thumbs;
@@ -1829,9 +2097,10 @@ function renderBatchResults(results, batch = null) {
       summary.textContent = `Batch ${batch.id.slice(0, 8)} | ${batch.completed || 0}/${batch.total || results.length} complete | ${batch.status || "queued"}`;
       actions.append(summary);
     }
-    if (batch?.zip_url && (batch.completed || 0) > 0) {
+    const batchZipUrl = absoluteUrl(batch?.zip_url, { allowBlob: false });
+    if (batchZipUrl && (batch.completed || 0) > 0) {
       const zipLink = document.createElement("a");
-      zipLink.href = batch.zip_url;
+      zipLink.href = batchZipUrl;
       zipLink.className = "secondary-button";
       zipLink.textContent = "Download Batch ZIP";
       actions.append(zipLink);
@@ -1850,6 +2119,8 @@ function renderBatchResults(results, batch = null) {
     batchResults.append(actions);
   }
   results.forEach((result) => {
+    const safeResultUrl = absoluteUrl(result.downloadUrl, { allowBlob: false });
+    const safeSourceUrl = absoluteUrl(result.sourceUrl, { allowBlob: false });
     const row = document.createElement("div");
     row.className = `batch-row ${result.ok ? "" : result.pending ? "pending" : "error"}`.trim();
     const copy = document.createElement("div");
@@ -1858,11 +2129,11 @@ function renderBatchResults(results, batch = null) {
     const meta = document.createElement("span");
     meta.textContent = result.ok || result.pending ? result.summary : result.error;
     copy.append(title, meta);
-    if (historyPreviewEnabled && result.ok && result.downloadUrl) {
-      copy.append(makePreviewThumbs(result.sourceUrl, result.downloadUrl, result.filename || result.name));
+    if (historyPreviewEnabled && result.ok && safeResultUrl) {
+      copy.append(makePreviewThumbs(safeSourceUrl, safeResultUrl, result.filename || result.name));
     }
     row.append(copy);
-    if (result.ok) {
+    if (result.ok && safeResultUrl) {
       const actions = document.createElement("div");
       actions.className = "job-actions";
       if (historyPreviewEnabled) {
@@ -1872,21 +2143,21 @@ function renderBatchResults(results, batch = null) {
         preview.textContent = "Preview";
         preview.setAttribute("aria-label", `Preview ${result.filename || result.name || "batch result"}`);
         preview.addEventListener("click", () => openStoredPreview({
-          sourceUrl: result.sourceUrl,
-          resultUrl: result.downloadUrl,
+          sourceUrl: safeSourceUrl,
+          resultUrl: safeResultUrl,
           filename: result.filename,
           summary: result.summary,
         }));
         actions.append(preview);
-        if (result.sourceUrl) {
+        if (safeSourceUrl) {
           const compare = document.createElement("button");
           compare.className = "small-button";
           compare.type = "button";
           compare.textContent = "Compare";
           compare.setAttribute("aria-label", `Compare ${result.filename || result.name || "batch result"}`);
           compare.addEventListener("click", () => openStoredPreview({
-            sourceUrl: result.sourceUrl,
-            resultUrl: result.downloadUrl,
+            sourceUrl: safeSourceUrl,
+            resultUrl: safeResultUrl,
             filename: result.filename,
             summary: result.summary,
             compare: true,
@@ -1895,7 +2166,7 @@ function renderBatchResults(results, batch = null) {
         }
       }
       const link = document.createElement("a");
-      link.href = result.downloadUrl;
+      link.href = safeResultUrl;
       link.download = result.filename;
       link.textContent = "Download";
       actions.append(link);
@@ -1927,6 +2198,8 @@ function historySearchTextForJob(job) {
   const output = job.output || {};
   return [
     job.id,
+    job.display_name,
+    job.note,
     job.filename,
     job.source_filename,
     job.tool,
@@ -2052,9 +2325,10 @@ function renderHistory(jobs, batches = []) {
       copy.append(title, statusLine);
       const actions = document.createElement("div");
       actions.className = "job-actions";
-      if (batch.zip_url && (batch.completed || 0) > 0) {
+      const batchZipUrl = absoluteUrl(batch.zip_url, { allowBlob: false });
+      if (batchZipUrl && (batch.completed || 0) > 0) {
         const zipLink = document.createElement("a");
-        zipLink.href = batch.zip_url;
+        zipLink.href = batchZipUrl;
         zipLink.textContent = "Download ZIP";
         actions.append(zipLink);
       }
@@ -2106,11 +2380,15 @@ function renderHistory(jobs, batches = []) {
     row.dataset.historyKey = jobKey;
     const status = job.status || (job.download_url ? "done" : "queued");
     const isDone = status === "done" || status === "completed";
-    const canDownload = Boolean(job.download_url);
+    const downloadUrl = absoluteUrl(job.download_url, { allowBlob: false });
+    const sourceUrl = absoluteUrl(job.source_download_url, { allowBlob: false });
+    const packUrl = absoluteUrl(job.listing_pack_url, { allowBlob: false });
+    const canDownload = Boolean(downloadUrl);
     const copy = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = job.filename || job.source_filename || "Processed image";
-    title.title = job.filename || job.source_filename || "Processed image";
+    const displayTitle = job.display_name || job.filename || job.source_filename || "Processed image";
+    title.textContent = displayTitle;
+    title.title = job.filename && job.display_name ? `${job.display_name} | File: ${job.filename}` : displayTitle;
     const meta = document.createElement("span");
     const output = job.output || {};
     meta.textContent = canDownload
@@ -2120,14 +2398,20 @@ function renderHistory(jobs, batches = []) {
     statusLine.className = "history-meta-line";
     statusLine.append(historyStatusBadge(status), meta);
     copy.append(title, statusLine);
-    if (historyPreviewEnabled && job.download_url) {
-      copy.append(makePreviewThumbs(job.source_download_url, job.download_url, job.filename || job.source_filename || "Processed image"));
+    if (job.note) {
+      const note = document.createElement("p");
+      note.className = "history-note";
+      note.textContent = job.note;
+      copy.append(note);
+    }
+    if (historyPreviewEnabled && downloadUrl) {
+      copy.append(makePreviewThumbs(sourceUrl, downloadUrl, job.filename || job.source_filename || "Processed image"));
     }
     const actions = document.createElement("div");
     actions.className = "job-actions";
     if (canDownload) {
       const link = document.createElement("a");
-      link.href = job.download_url;
+      link.href = downloadUrl;
       link.download = job.filename || "result.png";
       link.textContent = "Download";
       const previewButton = document.createElement("button");
@@ -2138,14 +2422,31 @@ function renderHistory(jobs, batches = []) {
       previewButton.addEventListener("click", () => {
         highlightHistorySelection(jobKey);
         openStoredPreview({
-          sourceUrl: job.source_download_url,
-          resultUrl: job.download_url,
+          sourceUrl,
+          resultUrl: downloadUrl,
           filename: job.filename || "result.png",
           summary: meta.textContent,
+          listingPackUrl: packUrl,
+          qualityReport: job.quality_report,
+          job,
+          compare: false,
         });
       });
       actions.append(previewButton);
-      if (job.source_download_url) {
+      const editButton = document.createElement("button");
+      editButton.className = "small-button";
+      editButton.type = "button";
+      editButton.textContent = "Name / Note";
+      editButton.addEventListener("click", () => editJobMetadata(job));
+      actions.append(editButton);
+      if (packUrl) {
+        const packLink = document.createElement("a");
+        packLink.href = packUrl;
+        packLink.download = "";
+        packLink.textContent = "PrintForge Pack";
+        actions.append(packLink);
+      }
+      if (sourceUrl) {
         const compareButton = document.createElement("button");
         compareButton.className = "small-button";
         compareButton.type = "button";
@@ -2154,10 +2455,13 @@ function renderHistory(jobs, batches = []) {
         compareButton.addEventListener("click", () => {
           highlightHistorySelection(jobKey);
           openStoredPreview({
-            sourceUrl: job.source_download_url,
-            resultUrl: job.download_url,
+            sourceUrl,
+            resultUrl: downloadUrl,
             filename: job.filename || "result.png",
             summary: meta.textContent,
+            listingPackUrl: packUrl,
+            qualityReport: job.quality_report,
+            job,
             compare: true,
           });
         });
@@ -2449,6 +2753,28 @@ async function resumeBatch(batch) {
   }
 }
 
+
+async function editJobMetadata(job) {
+  const currentName = job.display_name || job.filename || job.source_filename || "";
+  const displayName = window.prompt("Saved asset name", currentName);
+  if (displayName === null) return;
+  const note = window.prompt("Optional note for Recent Assets", job.note || "");
+  if (note === null) return;
+  try {
+    const response = await fetch(`/api/jobs/${encodeURIComponent(job.id)}/metadata`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: displayName, note }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || body.error || "Could not save name/note.");
+    setStatus("Ready", "ready", "Saved asset name and note updated.");
+    await loadHistory();
+  } catch (error) {
+    setStatus("Error", "error", error.message || "Could not save name/note.");
+  }
+}
+
 async function deleteSavedJob(job) {
   const name = job.filename || job.source_filename || "this saved job";
   const confirmed = window.confirm(
@@ -2573,6 +2899,16 @@ function settingsSnapshotFromUi() {
     postProcess: document.querySelector("#post-process-mask").checked,
     preserveInterior: document.querySelector("#preserve-interior").checked,
     respectAlpha: document.querySelector("#respect-alpha").checked,
+    upscaleDevice: upscaleDevice?.value || "auto",
+    backgroundDevice: backgroundDevice?.value || "auto",
+    vectorPreset: vectorPreset?.value || "logo",
+    vectorColormode: vectorColormode?.value || "color",
+    vectorHierarchical: vectorHierarchical?.value || "stacked",
+    vectorMode: vectorMode?.value || "spline",
+    vectorFilterSpeckle: vectorFilterSpeckle?.value || "4",
+    vectorColorPrecision: vectorColorPrecision?.value || "6",
+    vectorLayerDifference: vectorLayerDifference?.value || "16",
+    vectorPathPrecision: vectorPathPrecision?.value || "3",
     format: outputFormat.value,
   };
 }
@@ -2699,25 +3035,18 @@ async function deleteSelectedPreset() {
 
 function handleReviewAction(action) {
   if (!afterUrl) return;
-  if (action === "edge") {
-    setPreviewBackground("dark");
-    applyCompareZoom("fit");
-    openCompare({ mode: "slider" });
-    setStatus("Ready", "ready", "Inspecting edge cleanup on a dark background.");
+  if (action === "looks-good") {
+    setStatus("Complete", "complete", "Great — use Download Image or Create PrintForge Pack when ready.");
     return;
   }
-  if (action === "transparent") {
-    setPreviewBackground("green");
-    applyCompareZoom("fit");
-    openCompare({ mode: "after" });
-    setStatus("Ready", "ready", "Transparency preview switched to green.");
-    return;
-  }
-  if (action === "detail") {
-    setPreviewBackground("checker");
-    applyCompareZoom("100");
-    openCompare({ mode: "slider" });
-    setStatus("Ready", "ready", "100% compare is open for lettering and detail checks.");
+  const fixMap = {
+    "background-left": "remove-leftover-background",
+    halo: "fix-white-halo",
+    "rough-edges": "make-edges-smoother",
+    "detail-damage": "try-safer-mode",
+  };
+  if (fixMap[action]) {
+    reprocessWithQuickFix(fixMap[action]);
     return;
   }
   if (action === "size") {
@@ -2727,7 +3056,14 @@ function handleReviewAction(action) {
 }
 
 async function reprocessWithQuickFix(quickFix) {
-  const jobId = currentResultJob?.queue_job_id || currentResultJob?.id || currentQueueJobId;
+  const tool = currentResultJob?.tool || "";
+  const backgroundFixes = new Set(["remove-leftover-background", "fix-white-halo", "make-edges-smoother", "trim-edge-slightly"]);
+  const hasBackground = tool === "remove-background" || tool === "remove-background-upscale";
+  if (tool === "vectorize" || (backgroundFixes.has(quickFix) && !hasBackground)) {
+    setStatus("Error", "error", "That quick fix is not compatible with this result.");
+    return;
+  }
+  const jobId = currentResultJob?.queue_job_id || currentQueueJobId;
   if (!jobId) {
     setStatus("Error", "error", "No server queued job is available to reprocess.");
     return;
@@ -2795,6 +3131,10 @@ workflowCards.forEach((card) => {
   card.addEventListener("click", () => {
     applyWorkflow(card.dataset.workflowChoice || "shirt", true);
     setStatus("Ready", "ready", "Workflow settings applied. Start when ready.");
+    if (card.classList.contains("intent-card")) {
+      const target = selectedFile ? form : dropzone;
+      window.setTimeout(() => target?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    }
   });
 });
 
@@ -2971,6 +3311,23 @@ outputFormat.addEventListener("change", () => {
     }
   });
 });
+vectorPreset?.addEventListener("change", () => applyVectorPresetDefaults(true));
+[vectorPreset, vectorColormode, vectorHierarchical, vectorMode, vectorFilterSpeckle, vectorColorPrecision, vectorLayerDifference, vectorPathPrecision]
+  .filter(Boolean)
+  .forEach((control) => {
+    control.addEventListener("change", () => {
+      if (selectedFile && usesVectorize()) {
+        clearResultOnly();
+        setStatus("Ready", "ready", "Vector trace settings updated. Start when ready.");
+      }
+    });
+    control.addEventListener("input", () => {
+      if (selectedFile && usesVectorize()) {
+        clearResultOnly();
+        setStatus("Ready", "ready", "Vector trace settings updated. Start when ready.");
+      }
+    });
+  });
 cutModeInputs.forEach((input) => input.addEventListener("change", applyCutPreset));
 processAnother.addEventListener("click", clearWorkspace);
 compareToggle.addEventListener("click", toggleCompare);
@@ -3037,6 +3394,7 @@ assistantSecondary?.addEventListener("click", () => setActiveView("jobs"));
 function endpointForTool(tool) {
   if (tool === "remove-background") return "/api/remove-background";
   if (tool === "remove-background-upscale") return "/api/remove-background-upscale";
+  if (tool === "vectorize") return "/api/vectorize";
   return "/api/upscale";
 }
 
@@ -3052,6 +3410,17 @@ function buildPayload(file, size = selectedImageSize) {
   } else {
     payload.delete("upscale_device");
     payload.delete("background_device");
+  }
+  if (usesVectorize()) {
+    payload.set("output_format", "svg");
+    payload.set("vector_preset", vectorPreset?.value || "logo");
+    payload.set("vector_colormode", vectorColormode?.value || "color");
+    payload.set("vector_hierarchical", vectorHierarchical?.value || "stacked");
+    payload.set("vector_mode", vectorMode?.value || "spline");
+    payload.set("vector_filter_speckle", vectorFilterSpeckle?.value || "4");
+    payload.set("vector_color_precision", vectorColorPrecision?.value || "6");
+    payload.set("vector_layer_difference", vectorLayerDifference?.value || "16");
+    payload.set("vector_path_precision", vectorPathPrecision?.value || "3");
   }
   payload.delete("target_width");
   payload.delete("target_height");
@@ -3081,8 +3450,10 @@ function buildPayload(file, size = selectedImageSize) {
   } else {
     ["resize_method", "target_fit", "canvas_anchor", "export_quality", "sharpen_amount"].forEach((name) => payload.delete(name));
   }
-  if (tool !== "remove-background-upscale") {
-    payload.set("device", tool === "remove-background" ? backgroundDevice.value : upscaleDevice.value);
+  if (tool === "remove-background") {
+    payload.set("device", backgroundDevice.value);
+  } else if (tool === "upscale") {
+    payload.set("device", upscaleDevice.value);
   } else {
     payload.delete("device");
   }
@@ -3121,6 +3492,7 @@ function showResult(blob, response, fallbackName) {
     response.headers.get("X-Pipeline-Engine") ||
     response.headers.get("X-Upscaler-Engine") ||
     response.headers.get("X-Background-Engine") ||
+    response.headers.get("X-Vector-Engine") ||
     "";
   const extension = outputFormat.value.toUpperCase();
   afterMeta.textContent = `${width} x ${height} | ${extension} | ${formatBytes(blob.size)}`;
@@ -3133,12 +3505,14 @@ function showResult(blob, response, fallbackName) {
     engineChip.classList.remove("hidden");
   }
 
-  const downloadUrl = response.headers.get("X-Download-URL") || afterUrl;
-  const sourceUrl = response.headers.get("X-Source-URL") || beforeUrl;
+  const downloadUrl = absoluteUrl(response.headers.get("X-Download-URL"), { allowBlob: false }) || afterUrl;
+  const sourceUrl = absoluteUrl(response.headers.get("X-Source-URL"), { allowBlob: false }) || beforeUrl;
+  const listingPackUrl = absoluteUrl(response.headers.get("X-Listing-Pack-URL"), { allowBlob: false });
   const filename = filenameFromResponse(response, fallbackName || "result.png");
   resultDownload.href = downloadUrl;
   resultDownload.download = filename;
   resultDownload.textContent = `Download ${extension}`;
+  setListingPackDownload(listingPackUrl);
   resultActions.classList.remove("hidden");
   resetCompareDefaults();
   if (beforeUrl) openCompare({ mode: "slider" });
@@ -3150,6 +3524,7 @@ function showResult(blob, response, fallbackName) {
     downloadUrl,
     sourceUrl,
     filename,
+    listingPackUrl,
     summary: `${width} x ${height} ${extension}${printSummary} | ${formatBytes(blob.size)}`,
   };
 }
@@ -3180,6 +3555,7 @@ form.addEventListener("submit", async (event) => {
   let actionLabel = "Enhancing image";
   if (tool === "remove-background") actionLabel = "Removing background";
   if (tool === "remove-background-upscale") actionLabel = "Removing background and upscaling";
+  if (tool === "vectorize") actionLabel = "Vectorizing image";
   setBusyStatus(filesToProcess.length > 1 ? "Uploading batch to server" : "Uploading image to server");
   setStatus(
     "Uploading",

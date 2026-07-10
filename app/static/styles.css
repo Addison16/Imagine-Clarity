@@ -308,6 +308,131 @@ h1 {
   font-size: 14px;
 }
 
+.intent-hub {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.72fr) minmax(420px, 1fr);
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 14px;
+  border: 1px solid rgba(255, 196, 154, 0.7);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(255, 247, 237, 0.92)),
+    radial-gradient(circle at 12% 18%, rgba(255, 122, 26, 0.18), transparent 18rem);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+.intent-hub-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.intent-hub-copy h2 {
+  font-size: clamp(22px, 2.4vw, 34px);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+
+.intent-hub-copy p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.intent-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.intent-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "icon title"
+    "icon copy"
+    "icon action";
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: #ffffff;
+  color: var(--text);
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    background 140ms ease;
+}
+
+.intent-card:hover,
+.intent-card.active {
+  border-color: #ffb076;
+  background:
+    linear-gradient(135deg, rgba(255, 122, 26, 0.12), rgba(14, 165, 164, 0.07)),
+    #ffffff;
+  box-shadow: 0 12px 28px rgba(64, 43, 22, 0.12);
+  transform: translateY(-1px);
+}
+
+.intent-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.intent-icon {
+  grid-area: icon;
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 13px;
+  background: #fff3e8;
+  color: #a3460a;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.intent-card-featured .intent-icon {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+.intent-title {
+  grid-area: title;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.intent-card small {
+  grid-area: copy;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.28;
+}
+
+.intent-action {
+  grid-area: action;
+  margin-top: 4px;
+  color: var(--accent-hover);
+  font-size: 11px;
+  font-weight: 900;
+}
+
 .status-badge,
 .runtime-badge,
 .mini-badge {
@@ -1067,6 +1192,10 @@ body:not(.pro-mode) .advanced {
   display: none;
 }
 
+.workflow-picker-field {
+  display: none;
+}
+
 .advanced summary {
   width: 100%;
   min-height: 38px;
@@ -1585,6 +1714,92 @@ body:not(.pro-mode) .advanced {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+
+.result-check,
+.result-versions {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.result-check-list {
+  display: grid;
+  gap: 8px;
+}
+
+.result-check-row {
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 9px 10px;
+}
+
+.result-check-row strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.result-check-row span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.result-check-row.good {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+
+.result-check-row.warning {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.result-check-row.info {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.version-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.version-pill {
+  min-height: 34px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.version-pill.active,
+.version-pill:hover {
+  border-color: var(--accent);
+  background: #fff7ed;
+  color: var(--accent-hover);
+}
+
+.history-note {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.review-check-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .compare-controls {
@@ -2249,6 +2464,15 @@ body:not(.pro-mode) .advanced {
     flex-direction: column;
   }
 
+  .intent-hub {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+
+  .intent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .history-controls {
     grid-template-columns: 1fr;
   }
@@ -2313,9 +2537,74 @@ body:not(.pro-mode) .advanced {
     font-size: 24px;
   }
 
+  .hero-header {
+    border-radius: 22px;
+    padding: 16px;
+  }
+
+  .hero-header h1 {
+    font-size: 30px;
+    line-height: 1.05;
+  }
+
+  .hero-header .subtitle {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .hero-benefits {
+    display: none;
+  }
+
+  .hero-status-card {
+    width: 100%;
+    padding: 10px;
+  }
+
+  .creator-intro {
+    display: none;
+  }
+
   .sidebar,
   .preview-card {
     padding: 16px;
+  }
+
+  .intent-hub {
+    margin-bottom: 10px;
+    border-radius: 20px;
+    padding: 12px;
+  }
+
+  .intent-hub-copy h2 {
+    font-size: 22px;
+  }
+
+  .intent-hub-copy p {
+    font-size: 12px;
+  }
+
+  .intent-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .intent-card {
+    min-height: 68px;
+    border-radius: 16px;
+    padding: 10px;
+  }
+
+  .intent-card small {
+    display: none;
+  }
+
+  .intent-title {
+    font-size: 13px;
+  }
+
+  .intent-action {
+    margin-top: 2px;
   }
 
   .segmented,
@@ -2346,7 +2635,8 @@ body:not(.pro-mode) .advanced {
     width: 100%;
   }
 
-  .compare-controls {
+
+.compare-controls {
     justify-content: stretch;
   }
 
@@ -2360,7 +2650,7 @@ body:not(.pro-mode) .advanced {
 }
 
 /* Compact creator layout: reduce vertical scrolling on desktop while preserving mobile readability. */
-@media (min-width: 901px) {
+@media (min-width: 1024px) {
   .hero-header {
     border-radius: 24px;
     padding: 16px 18px;

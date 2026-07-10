@@ -1,10 +1,10 @@
 name: Docker Publish
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
     branches: ["main"]
-    tags: ["v*.*.*"]
-  workflow_dispatch:
+    types: [completed]
 
 permissions:
   contents: read
@@ -13,8 +13,13 @@ permissions:
 env:
   REGISTRY: ghcr.io
 
+concurrency:
+  group: docker-publish-main
+  cancel-in-progress: false
+
 jobs:
-  build:
+  build-immutable:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,8 +31,13 @@ jobs:
             dockerfile: Dockerfile.gpu
 
     steps:
-      - name: Checkout
+      - name: Resolve verified revision
+        run: echo "PUBLISH_SHA=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_ENV"
+
+      - name: Checkout verified revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set image name
         run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -42,13 +52,74 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.tag }} image
+      - name: Build and push immutable ${{ matrix.tag }} image
         run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
+          SHORT_SHA="${PUBLISH_SHA::7}"
           IMAGE="${REGISTRY}/${IMAGE_NAME}"
           docker buildx build \
             --file "${{ matrix.dockerfile }}" \
-            --tag "${IMAGE}:${{ matrix.tag }}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${PUBLISH_SHA}" \
             --tag "${IMAGE}:${{ matrix.tag }}-${SHORT_SHA}" \
             --push \
             .
+
+  promote-public-tags:
+    needs: build-immutable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve revision and image
+        run: |
+          PUBLISH_SHA="${{ github.event.workflow_run.head_sha }}"
+          echo "PUBLISH_SHA=${PUBLISH_SHA}" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${PUBLISH_SHA::7}" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Ensure the verified revision is still main
+        run: |
+          CURRENT_MAIN="$(git ls-remote "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" refs/heads/main | cut -f1)"
+          test "${CURRENT_MAIN}" = "${PUBLISH_SHA}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote verified CPU and GPU tags with rollback
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          CPU_SOURCE="${IMAGE}:cpu-${SHORT_SHA}"
+          GPU_SOURCE="${IMAGE}:gpu-${SHORT_SHA}"
+          manifest_digest() {
+            local reference="$1"
+            local hash
+            hash="$(docker buildx imagetools inspect "${reference}" --raw | sha256sum | cut -d' ' -f1)"
+            printf 'sha256:%s\n' "${hash}"
+          }
+          EXPECTED_CPU="$(manifest_digest "${CPU_SOURCE}")"
+          EXPECTED_GPU="$(manifest_digest "${GPU_SOURCE}")"
+          OLD_CPU="$(manifest_digest "${IMAGE}:cpu" 2>/dev/null || true)"
+          OLD_LATEST="$(manifest_digest "${IMAGE}:latest" 2>/dev/null || true)"
+          OLD_GPU="$(manifest_digest "${IMAGE}:gpu" 2>/dev/null || true)"
+
+          rollback() {
+            echo "Mutable-tag promotion failed; restoring previous tags." >&2
+            test -z "${OLD_GPU}" || docker buildx imagetools create --tag "${IMAGE}:gpu" "${IMAGE}@${OLD_GPU}" || true
+            test -z "${OLD_CPU}" || docker buildx imagetools create --tag "${IMAGE}:cpu" "${IMAGE}@${OLD_CPU}" || true
+            test -z "${OLD_LATEST}" || docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}@${OLD_LATEST}" || true
+          }
+          trap rollback ERR
+
+          docker buildx imagetools create --tag "${IMAGE}:gpu" "${GPU_SOURCE}"
+          docker buildx imagetools create --tag "${IMAGE}:cpu" --tag "${IMAGE}:latest" "${CPU_SOURCE}"
+
+          test "$(manifest_digest "${IMAGE}:gpu")" = "${EXPECTED_GPU}"
+          test "$(manifest_digest "${IMAGE}:cpu")" = "${EXPECTED_CPU}"
+          test "$(manifest_digest "${IMAGE}:latest")" = "${EXPECTED_CPU}"
+          trap - ERR

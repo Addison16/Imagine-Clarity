@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Python syntax
+        run: python -m compileall app scripts/smoke_test.py tests
+
+      - name: JavaScript syntax
+        run: node --check app/static/app.js
+
+      - name: Workflow, Compose, and diff hygiene
+        run: |
+          python -m pip install -q PyYAML
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          for path in Path('.github/workflows').glob('*.yml'):
+              yaml.safe_load(path.read_text(encoding='utf-8'))
+              print(f'parsed {path}')
+          PY
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config --quiet
+          docker compose -f docker-compose.prebuilt.yml config --quiet
+          docker compose -f docker-compose.prebuilt.yml -f docker-compose.prebuilt.gpu.yml config --quiet
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "${BASE_SHA}..HEAD"
+          else
+            git show --check --format= HEAD
+          fi
+
+      - name: Build CPU image
+        run: docker build --file Dockerfile --tag imagine-clarity-ci:cpu .
+
+      - name: Unit tests in CPU image
+        run: >-
+          docker run --rm
+          --volume "$PWD:/workspace:ro"
+          --workdir /workspace
+          imagine-clarity-ci:cpu
+          sh -lc "python -m pip install -q -r requirements.test.txt && python -m unittest discover -s tests -v"
+
+      - name: Start all-in-one CPU container
+        run: >-
+          docker run -d
+          --name clarity-upscaler
+          --publish 8794:8794
+          --volume clarity-ci-data:/data
+          --volume clarity-ci-models:/models
+          imagine-clarity-ci:cpu
+
+      - name: Wait for API readiness
+        run: |
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8794/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs clarity-upscaler
+          exit 1
+
+      - name: API, queue, batch, and vector smoke test
+        run: docker exec clarity-upscaler python scripts/smoke_test.py http://127.0.0.1:8794
+
+      - name: Verify one-container queue architecture
+        run: |
+          test "$(docker ps --filter name=clarity-upscaler --format '{{.ID}}' | wc -l)" -eq 1
+          docker exec clarity-upscaler python -c "from redis import Redis; assert Redis.from_url('redis://127.0.0.1:6379/0').ping()"
+          test -z "$(docker port clarity-upscaler 6379/tcp)"
+
+      - name: Stop all-in-one integration container
+        if: always()
+        run: |
+          docker rm --force clarity-upscaler 2>/dev/null || true
+          docker volume rm clarity-ci-data clarity-ci-models 2>/dev/null || true
+
+      - name: Audit installed Python packages
+        run: >-
+          docker run --rm imagine-clarity-ci:cpu sh -lc
+          "python -m pip install -q pip-audit &&
+          pip-audit --local --progress-spinner=off
+          --ignore-vuln PYSEC-2026-1215
+          --ignore-vuln CVE-2026-40086
+          --ignore-vuln GHSA-55v6-g8pm-pw4c"

@@ -20,6 +20,7 @@ from app.job_queue import (
 )
 from app.jobs import save_job_result
 from app.upscaler import UpscaleOptions, upscale_image
+from app.vectorizer import VectorizeOptions, vectorize_image
 
 ProgressCallback = Callable[[int, str, str], None]
 
@@ -58,6 +59,9 @@ def process_single_job(job_id: str) -> None:
             engine=result["engine"],
             settings=settings,
             source_data=data,
+            queue_job_id=job_id,
+            parent_queue_job_id=str(raw_job.get("parent_queue_job_id") or "") or None,
+            quick_fix=str(raw_job.get("quick_fix") or "") or None,
         )
         update_job(
             job_id,
@@ -267,6 +271,24 @@ def _process_one(
                 "input_metadata": metadata,
             },
             {"background": asdict(bg), "upscale": asdict(up)},
+        )
+
+    if tool == "vectorize":
+        vector = VectorizeOptions(**settings)
+        progress(18, "vectorize", "Tracing bitmap into SVG paths.")
+        result = vectorize_image(data, vector)
+        progress(88, "encode", "Encoding vector SVG.")
+        return (
+            {
+                "data": result.data,
+                "width": result.width,
+                "height": result.height,
+                "extension": result.extension,
+                "engine": result.engine,
+                "filename": f"{stem}-vector.svg",
+                "input_metadata": metadata,
+            },
+            asdict(result.options),
         )
 
     up = UpscaleOptions(**settings)

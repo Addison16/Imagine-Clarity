@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
+from app.devices import normalize_device, select_torch_device
+
 SUPPORTED_FORMATS = {"png", "jpeg", "jpg", "webp", "tiff", "tif"}
 MODEL_DIR = Path(os.getenv("MODEL_DIR", "/models"))
 RESIZE_METHODS = {"auto", "nearest", "bilinear", "bicubic", "lanczos", "mitchell", "preserve"}
@@ -122,7 +124,7 @@ _cache_lock = threading.Lock()
 
 
 def upscale_image(raw: bytes, options: UpscaleOptions) -> UpscaleResult:
-    options = _normalize_options(options)
+    options = normalize_upscale_options(options)
     img = _open_image(raw)
     resize_plan = _resolve_resize_plan(img.width, img.height, options)
     process_scale = _target_process_scale(img, resize_plan.content_size)
@@ -171,7 +173,7 @@ def upscale_image(raw: bytes, options: UpscaleOptions) -> UpscaleResult:
     )
 
 
-def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
+def normalize_upscale_options(options: UpscaleOptions) -> UpscaleOptions:
     scale = float(options.scale)
     if scale not in {2.0, 3.0, 4.0, 8.0}:
         raise ValueError("Scale must be 2, 3, 4, or 8.")
@@ -227,7 +229,7 @@ def _normalize_options(options: UpscaleOptions) -> UpscaleOptions:
         face_enhance=bool(options.face_enhance),
         denoise=denoise,
         tile=tile,
-        device=_normalize_device(options.device),
+        device=normalize_device(options.device, env_var="UPSCALER_DEVICE"),
         output_format=output_format,
         target_width=target_width,
         target_height=target_height,
@@ -252,7 +254,7 @@ def _normalize_target_dimension(value: int | None, label: str) -> int | None:
 
 
 def resolve_upscale_sizes(width: int, height: int, options: UpscaleOptions) -> tuple[tuple[int, int], tuple[int, int]]:
-    options = _normalize_options(options)
+    options = normalize_upscale_options(options)
     plan = _resolve_resize_plan(width, height, options)
     return plan.content_size, plan.final_size
 
@@ -353,14 +355,7 @@ def _select_auto_mode(img: Image.Image, options: UpscaleOptions) -> str:
 
 
 def _normalize_device(requested: str) -> str:
-    device = (requested or "auto").lower().strip()
-    if device == "auto":
-        device = os.getenv("UPSCALER_DEVICE", "auto").lower().strip()
-    if device == "gpu":
-        device = "cuda"
-    if device in {"auto", "cpu"} or device.startswith("cuda"):
-        return device
-    raise ValueError("Upscale device must be auto, cpu, or cuda.")
+    return normalize_device(requested, env_var="UPSCALER_DEVICE")
 
 
 def _open_image(raw: bytes) -> Image.Image:
@@ -507,30 +502,33 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
     device_key = str(device)
     half = device.type == "cuda"
 
-    with _cache_lock:
-        upsampler = _upsampler_cache.get((spec.key, device_key))
-        if upsampler is None:
-            MODEL_DIR.mkdir(parents=True, exist_ok=True)
-            model_path = _download_model(load_file_from_url, spec.model_url)
-            dni_weight = None
-            if spec.dni_url:
-                dni_path = _download_model(load_file_from_url, spec.dni_url)
-                model_path = [model_path, dni_path]
-                dni_weight = [options.denoise, 1 - options.denoise]
+    try:
+        with _cache_lock:
+            upsampler = _upsampler_cache.get((spec.key, device_key))
+            if upsampler is None:
+                MODEL_DIR.mkdir(parents=True, exist_ok=True)
+                model_path = _download_model(load_file_from_url, spec.model_url)
+                dni_weight = None
+                if spec.dni_url:
+                    dni_path = _download_model(load_file_from_url, spec.dni_url)
+                    model_path = [model_path, dni_path]
+                    dni_weight = [options.denoise, 1 - options.denoise]
 
-            model = _build_model(spec, RRDBNet, SRVGGNetCompact)
-            upsampler = RealESRGANer(
-                scale=spec.scale,
-                model_path=model_path,
-                dni_weight=dni_weight,
-                model=model,
-                tile=options.tile,
-                tile_pad=10,
-                pre_pad=0,
-                half=half,
-                device=device,
-            )
-            _upsampler_cache[(spec.key, device_key)] = upsampler
+                model = _build_model(spec, RRDBNet, SRVGGNetCompact)
+                upsampler = RealESRGANer(
+                    scale=spec.scale,
+                    model_path=model_path,
+                    dni_weight=dni_weight,
+                    model=model,
+                    tile=options.tile,
+                    tile_pad=10,
+                    pre_pad=0,
+                    half=half,
+                    device=device,
+                )
+                _upsampler_cache[(spec.key, device_key)] = upsampler
+    except Exception as exc:
+        raise RuntimeError(f"Neural upscaler initialization failed: {exc}") from exc
 
     upsampler.tile = options.tile
     if spec.dni_url and hasattr(upsampler, "dni_weight"):
@@ -550,10 +548,12 @@ def _neural_resize(img: Image.Image, options: UpscaleOptions) -> tuple[Image.Ima
         else:
             output, _ = upsampler.enhance(cv_img, outscale=options.scale)
             engine = f"{spec.display_name} ({device.type.upper()})"
-    except RuntimeError as exc:
+    except Exception as exc:
         if "out of memory" in str(exc).lower() and options.tile == 0:
             raise RuntimeError("Upscale ran out of memory. Retry with tile size 256 or 128.") from exc
-        raise
+        if isinstance(exc, RuntimeError):
+            raise
+        raise RuntimeError(f"Neural upscaling failed: {exc}") from exc
 
     return _cv_to_pil(output, cv2), engine
 
@@ -581,13 +581,7 @@ def _build_model(spec: ModelSpec, rrdb_cls: Any, srvgg_cls: Any) -> Any:
 
 
 def _select_device(torch: Any, requested: str) -> Any:
-    if requested == "cpu":
-        return torch.device("cpu")
-    if requested.startswith("cuda"):
-        if not torch.cuda.is_available():
-            raise RuntimeError("CUDA was selected for this upscale job, but CUDA is not available in this container.")
-        return torch.device(requested)
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return select_torch_device(torch, requested)
 
 
 def _download_model(load_file_from_url: Any, url: str) -> str:

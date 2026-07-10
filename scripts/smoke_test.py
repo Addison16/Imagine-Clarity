@@ -4,9 +4,15 @@ import io
 import sys
 import time
 import zipfile
+from xml.etree import ElementTree as ET
 
 import requests
 from PIL import Image, ImageDraw
+
+
+def assert_svg(payload: bytes) -> None:
+    root = ET.fromstring(payload.strip())
+    assert root.tag.rsplit("}", 1)[-1].lower() == "svg", payload[:100]
 
 
 def main() -> int:
@@ -14,6 +20,7 @@ def main() -> int:
     health = requests.get(f"{base_url}/health", timeout=10)
     health.raise_for_status()
     assert health.json()["max_image_dimension"] == 16384, health.json()
+    assert health.json()["max_output_pixels"] == 64000000, health.json()
     diagnostics = requests.get(f"{base_url}/api/diagnostics", timeout=10)
     diagnostics.raise_for_status()
     assert diagnostics.json()["status"] == "ok", diagnostics.text
@@ -22,10 +29,19 @@ def main() -> int:
     assert queue_health.json()["redis_connected"], queue_health.text
     capabilities = requests.get(f"{base_url}/api/capabilities", timeout=10)
     capabilities.raise_for_status()
-    assert "remove-background-upscale" in capabilities.json()["tools"], capabilities.text
-    assert "tiff" in capabilities.json()["output_formats"], capabilities.text
-    assert "lanczos" in capabilities.json()["upscale"]["resize_methods"], capabilities.text
-    assert capabilities.json()["queue"]["backend"] == "redis-rq", capabilities.text
+    capabilities_body = capabilities.json()
+    assert "remove-background-upscale" in capabilities_body["tools"], capabilities.text
+    assert "vectorize" in capabilities_body["tools"], capabilities.text
+    assert "svg" in capabilities_body["output_formats"], capabilities.text
+    assert "tiff" in capabilities_body["output_formats"], capabilities.text
+    assert "lanczos" in capabilities_body["upscale"]["resize_methods"], capabilities.text
+    assert capabilities_body["vectorize"]["engine"] == "vtracer", capabilities.text
+    runtime_devices = capabilities_body["runtime"].get("processing_devices") or []
+    assert any(device.get("value") == "cpu" for device in runtime_devices), capabilities.text
+    assert any(device.get("upscale_supported") for device in runtime_devices), capabilities.text
+    assert any(device.get("background_supported") for device in runtime_devices), capabilities.text
+    assert capabilities_body["recommendations"], capabilities.text
+    assert capabilities_body["queue"]["backend"] == "redis-rq", capabilities.text
     presets = requests.get(f"{base_url}/api/presets", timeout=10)
     presets.raise_for_status()
     preset_payload = presets.json()
@@ -85,6 +101,17 @@ def main() -> int:
     source.raise_for_status()
     source_img = Image.open(io.BytesIO(source.content))
     assert source_img.size == (64, 48), source_img.size
+    assert not response.headers.get("X-Listing-Pack-URL"), response.headers
+    listing_pack = requests.get(f"{base_url}{response.headers['X-Download-URL']}/listing-pack", timeout=10)
+    assert listing_pack.status_code == 404, listing_pack.text
+    meta = requests.patch(
+        f"{base_url}{response.headers['X-Download-URL'].replace('/api/results/', '/api/jobs/')}/metadata",
+        json={"display_name": "Smoke renamed job", "note": "Smoke note"},
+        timeout=10,
+    )
+    meta.raise_for_status()
+    assert meta.json()["job"]["display_name"] == "Smoke renamed job", meta.text
+    assert meta.json()["job"]["note"] == "Smoke note", meta.text
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -181,7 +208,7 @@ def main() -> int:
         timeout=30,
     )
     assert response.status_code == 400, response.text
-    assert "Maximum output resolution is 16384 x 16384" in response.text, response.text
+    assert "Maximum raster resolution is 16384 x 16384" in response.text, response.text
 
     buffer = io.BytesIO()
     img.save(buffer, format="PNG")
@@ -202,7 +229,7 @@ def main() -> int:
         timeout=30,
     )
     assert response.status_code == 400, response.text
-    assert "Maximum output resolution is 16384 x 16384" in response.text, response.text
+    assert "Maximum raster resolution is 16384 x 16384" in response.text, response.text
 
     logo = Image.new("RGB", (90, 70), "white")
     draw = ImageDraw.Draw(logo)
@@ -307,6 +334,104 @@ def main() -> int:
     assert out.getpixel((0, 0))[3] == 0, out.getpixel((0, 0))
     assert out.getpixel((90, 70))[3] > 220, out.getpixel((90, 70))
 
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/process",
+        files={"image": ("process-combo-logo.png", buffer, "image/png")},
+        data={
+            "tool": "remove-background-upscale",
+            "response_mode": "json",
+            "device": "definitely-invalid-device",
+            "upscale_device": "cpu",
+            "background_device": "cpu",
+            "scale": "2",
+            "mode": "auto",
+            "face_enhance": "false",
+            "denoise": "0.55",
+            "tile": "256",
+            "target_width": "180",
+            "target_height": "140",
+            "model": "logo",
+            "cut_mode": "balanced",
+            "alpha_matting": "false",
+            "edge_refine": "8",
+            "background_tolerance": "34",
+            "post_process_mask": "true",
+            "preserve_interior": "true",
+            "respect_existing_alpha": "true",
+            "output_format": "png",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    process_combo = response.json()
+    assert process_combo["metadata"]["engine"], process_combo
+    saved = requests.get(process_combo["download_url"], timeout=10)
+    saved.raise_for_status()
+    out = Image.open(io.BytesIO(saved.content)).convert("RGBA")
+    assert out.size == (180, 140), out.size
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/vectorize",
+        files={"image": ("vector-logo.png", buffer, "image/png")},
+        data={
+            "vector_preset": "logo",
+            "vector_colormode": "color",
+            "vector_hierarchical": "stacked",
+            "vector_mode": "spline",
+            "vector_filter_speckle": "4",
+            "vector_color_precision": "6",
+            "vector_layer_difference": "16",
+            "vector_path_precision": "3",
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    assert response.headers["X-Vector-Engine"].startswith("VTracer"), response.headers
+    assert response.headers["X-Download-URL"].startswith("/api/results/"), response.headers
+    assert_svg(response.content)
+    vector_pack = requests.get(f"{base_url}{response.headers['X-Download-URL']}/listing-pack", timeout=10)
+    assert vector_pack.status_code == 404, vector_pack.text
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/process",
+        files={"image": ("process-vector-logo.png", buffer, "image/png")},
+        data={"tool": "vectorize", "response_mode": "json", "vector_preset": "logo"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    vector_payload = response.json()
+    assert vector_payload["job_id"], vector_payload
+    assert vector_payload["relative_download_url"].startswith("/api/results/"), vector_payload
+    assert vector_payload["metadata"]["engine"].startswith("VTracer"), vector_payload
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/process",
+        files={"image": ("process-line-art-vector.png", buffer, "image/png")},
+        data={"tool": "vectorize", "response_mode": "json", "vector_preset": "line-art"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    line_art_payload = response.json()
+    assert "line-art" in line_art_payload["metadata"]["engine"], line_art_payload
+    assert "binary" in line_art_payload["metadata"]["engine"], line_art_payload
+    line_art_job = requests.get(f"{base_url}/api/jobs/{line_art_payload['job_id']}", timeout=10)
+    line_art_job.raise_for_status()
+    line_art_job_payload = line_art_job.json()
+    assert line_art_job_payload["settings"]["colormode"] == "binary", line_art_job_payload
+    assert any("Color mode: binary" in check["message"] for check in line_art_job_payload["quality_report"]["checks"]), line_art_job_payload
+
     batch_files = []
     for idx, color in enumerate(("#2563eb", "#f97316"), start=1):
         batch_img = Image.new("RGB", (32, 24), "#f8fafc")
@@ -323,7 +448,8 @@ def main() -> int:
             "tool": "upscale",
             "scale": "2",
             "mode": "conservative",
-            "device": "cpu",
+            "device": "definitely-invalid-device",
+            "upscale_device": "cpu",
             "output_format": "png",
         },
         timeout=30,
@@ -350,6 +476,40 @@ def main() -> int:
     with zipfile.ZipFile(io.BytesIO(zipped.content)) as archive:
         assert len(archive.namelist()) == 2, archive.namelist()
 
+    vector_batch_files = []
+    for idx, color in enumerate(("#111827", "#2563eb"), start=1):
+        batch_img = Image.new("RGB", (40, 40), "#ffffff")
+        batch_draw = ImageDraw.Draw(batch_img)
+        batch_draw.rectangle((10, 10, 30, 30), fill=color)
+        buffer = io.BytesIO()
+        batch_img.save(buffer, format="PNG")
+        vector_batch_files.append(("images", (f"vector-batch-{idx}.png", buffer.getvalue(), "image/png")))
+
+    response = requests.post(
+        f"{base_url}/api/batches",
+        files=vector_batch_files,
+        data={"tool": "vectorize", "vector_preset": "line-art"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    vector_batch = response.json()["batch"]
+    assert vector_batch["tool"] == "vectorize", vector_batch
+    for _ in range(30):
+        poll = requests.get(f"{base_url}/api/batches/{vector_batch['id']}", timeout=10)
+        poll.raise_for_status()
+        vector_batch = poll.json()
+        if vector_batch["status"] in {"done", "completed"}:
+            break
+        time.sleep(1)
+    assert vector_batch["completed"] == 2 and vector_batch["failed"] == 0, vector_batch
+    assert vector_batch["items"][0]["result_filename"].endswith(".svg"), vector_batch
+    vector_zipped = requests.get(f"{base_url}{vector_batch['zip_url']}", timeout=10)
+    vector_zipped.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(vector_zipped.content)) as archive:
+        names = archive.namelist()
+        assert len(names) == 2 and all(name.endswith(".svg") for name in names), names
+        assert_svg(archive.read(names[0]))
+
     buffer = io.BytesIO()
     logo.save(buffer, format="PNG")
     buffer.seek(0)
@@ -369,6 +529,15 @@ def main() -> int:
     payload = response.json()
     assert payload["job_id"], payload
     assert payload["download_url"].startswith(base_url), payload
+    assert payload["listing_pack_url"].startswith(base_url), payload
+    listing_pack = requests.get(payload["listing_pack_url"], timeout=10)
+    listing_pack.raise_for_status()
+    with zipfile.ZipFile(io.BytesIO(listing_pack.content)) as archive:
+        names = archive.namelist()
+        assert any("-transparent-" in name and name.endswith(".png") for name in names), names
+        assert any(name.endswith("-white-bg.jpg") for name in names), names
+        assert any(name.endswith("-web.webp") for name in names), names
+        assert any(name.endswith("-metadata.txt") for name in names), names
 
     subject = Image.new("RGB", (64, 64), "#e8eef6")
     draw = ImageDraw.Draw(subject)
@@ -414,7 +583,8 @@ def main() -> int:
             "tool": "upscale",
             "scale": "2",
             "mode": "conservative",
-            "device": "cpu",
+            "device": "definitely-invalid-device",
+            "upscale_device": "cpu",
             "output_format": "png",
         },
         timeout=30,
@@ -433,6 +603,12 @@ def main() -> int:
             raise AssertionError(queued)
         time.sleep(1)
     assert queued["download_url"].startswith("/api/results/"), queued
+    invalid_reprocess = requests.post(
+        f"{base_url}/api/jobs/{queued['id']}/reprocess",
+        json={"settings": {"mode": 123}},
+        timeout=10,
+    )
+    assert invalid_reprocess.status_code == 400, invalid_reprocess.text
     reprocess = requests.post(
         f"{base_url}/api/jobs/{queued['id']}/reprocess",
         json={"quick_fix": "preserve-more-detail"},
@@ -452,6 +628,34 @@ def main() -> int:
             raise AssertionError(requeued)
         time.sleep(1)
     assert requeued["download_url"].startswith("/api/results/"), requeued
+
+    buffer = io.BytesIO()
+    logo.save(buffer, format="PNG")
+    buffer.seek(0)
+    response = requests.post(
+        f"{base_url}/api/jobs/queue",
+        files={"image": ("queued-vector.png", buffer, "image/png")},
+        data={"tool": "vectorize", "vector_preset": "logo", "vector_colormode": "color"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    queued_vector = response.json()["job"]
+    assert queued_vector["tool"] == "vectorize", queued_vector
+    for _ in range(30):
+        poll = requests.get(f"{base_url}/api/jobs/{queued_vector['id']}", timeout=10)
+        poll.raise_for_status()
+        queued_vector = poll.json()
+        if queued_vector["status"] == "done":
+            break
+        if queued_vector["status"] == "error":
+            raise AssertionError(queued_vector)
+        time.sleep(1)
+    assert queued_vector["download_url"].startswith("/api/results/"), queued_vector
+    assert queued_vector["output"]["format"] == "svg", queued_vector
+    assert not queued_vector.get("listing_pack_url"), queued_vector
+    saved_vector = requests.get(f"{base_url}{queued_vector['download_url']}", timeout=10)
+    saved_vector.raise_for_status()
+    assert_svg(saved_vector.content)
 
     print("smoke ok")
     return 0
